@@ -19,6 +19,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
 {
   #Set large max print to avoid issues with writing out a large forecast file.
   options(max.print = 1000000)
+  setwd(paste0(assessment_dir))
   #First set up a working director for running projections in (to avoid overwriting the base files with a failed model run)
   #then copy all of the assessment files to this working folder (ignore any output directories that have been previously created)
   if(dir.exists(paste0(assessment_dir,"/Working_dir"))){
@@ -173,7 +174,14 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
   fitting_depletion <- TRUE
   loop <- 0
   MSY.Fit <- data.frame(catch=c(0),Ave.F=c(0),weight=c(1))
-  par(mfrow=c(2,2))
+  method <- "MSY/proxy target"
+  par(mfrow=c(3,2))
+  FAdjust <- matrix(c(rep(1,100*length(seasons)*length(F_cols)),
+                      rep(0.1,100*length(seasons)*length(F_cols)),
+                      rep(10,100*length(seasons)*length(F_cols))),
+                    nrow=100*length(seasons)*length(F_cols),
+                    ncol=3, byrow = FALSE)
+  
   while(keepFitting){
     #Read in the SS results for landings and stock status to determine if desired
     #targets have been achieved
@@ -183,7 +191,8 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     SPRfit <- resultsFit[["sprseries"]]
     SPRfit <- SPRfit[SPRfit[,"Yr"]>dat[["endyr"]],]
     loop <- loop + 1
-    plot(SPRfit[SPRfit[,"Yr"]>=dat[["endyr"]],"F_report"],xlab="year",ylab="F",main = paste0("loop = ",loop))
+    plot(SPRfit[SPRfit[,"Yr"]>=dat[["endyr"]],"F_report"],xlab="year",ylab="F",main = paste0(method," loop = ",loop))
+    plot(SPRfit[SPRfit[,"Yr"]>=dat[["endyr"]],"Deplete"],xlab="year",ylab="Depletion",main = paste0(method," loop = ",loop))
     
     
     TimeFit2 <- aggregate(TimeFit[,sort(c(2,4,7,Catch_cols,F_cols))],by=list(TimeFit$Yr,TimeFit$Seas),FUN=sum)[,-c(3,4,5)]
@@ -208,6 +217,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
         
         Achieved.Depletion <- mean(Depletion[(length(Depletion)-9):length(Depletion)])
         DepletionScale <- (1-Target.Depletion)/(1-Achieved.Depletion)
+        #DepletionScale <- Achieved.Depletion/Target.Depletion
         
         DepletionScale <- (-log(1-((1-exp(-FScale))*DepletionScale))/FScale)
       }else if(Forecast_target==2){
@@ -237,6 +247,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
 
         Achieved.Depletion <- mean(Depletion[(length(Depletion)-9):length(Depletion)])
         DepletionScale <- (1-Target.Depletion)/(1-Achieved.Depletion)
+        #DepletionScale <- Achieved.Depletion/Target.Depletion
         
         DepletionScale <- (-log(1-((1-exp(-FScale))*DepletionScale))/FScale)
       }
@@ -246,8 +257,8 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     }
     
     if(n_groups>0){
-      Catch_tot <- apply(TimeFit3[,Catch_cols3],1,sum)
       Catch_temp <- TimeFit3[,Catch_cols3]
+      Catch_tot <- apply(Catch_temp[,which(groups!=0)],1,sum)
       for(i in 1:n_groups){
         sort.mat <- matrix(NA, nrow = 100*length(seasons)*length(which(groups==i)), ncol = 2)
         sort.mat[,1] <- rep(1:100,length(seasons)*length(which(groups==i)))
@@ -257,27 +268,26 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
       }
     }
     
-    
-    
     Fmult1 <- rep(DepletionScale,100*length(seasons)*length(F_cols))
     Fmult2 <- FScale/SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))]
-    Fmult3 <- Allocations[,5]/Allocations[,6]
-    Fmult3 <- (-log(1-((1-exp(-forecast_F[,4]))*Fmult3))/forecast_F[,4])
+    Fmult3 <- (0.5*(Allocations[,5]/Allocations[,6]-1)+1)
+    #Fmult3 <- (-log(1-((1-exp(-forecast_F[,4]))*Fmult3))/forecast_F[,4])
     Fmult1[fixed_ref] <- 1
     Fmult2[fixed_ref] <- 1
     Fmult3[fixed_ref] <- 1
     Comb_Mult <- Fmult1*Fmult2*Fmult3
+    Final_Mult <- Comb_Mult
     
     col_options <- c("black","dark red","dark green","dark blue","orange","purple","red","green","blue","brown","pink","yellow",colors())
     point_options <- c(16,15,17,18,8,9,10,11,12,13,0,1,2,3,4,5,6,14,21,22,23,24,25,19,20)
-    plot(Fmult1,xlab="year/season/fleet",ylab="Depletion Adjustment",col=rep(col_options[seq_along(F_cols)],100*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),100),main = paste0("loop = ",loop))
-    plot(Fmult2,xlab="year/season/fleet",ylab="F Adjustment",col=rep(col_options[seq_along(F_cols)],100*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),100),main = paste0("loop = ",loop))
-    plot(Fmult3,xlab="year/season/fleet",ylab="Allocation Adjustment",col=rep(col_options[seq_along(F_cols)],100*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),100),main = paste0("loop = ",loop))
+    plot(Fmult1,xlab="year/season/fleet",ylab="Depletion Adjustment",col=rep(col_options[seq_along(F_cols)],100*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),100),main = paste0(method," loop = ",loop))
+    plot(Fmult2,xlab="year/season/fleet",ylab="F Adjustment",col=rep(col_options[seq_along(F_cols)],100*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),100),main = paste0(method," loop = ",loop))
+    plot(Fmult3,xlab="year/season/fleet",ylab="Allocation Adjustment",col=rep(col_options[seq_along(F_cols)],100*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),100),main = paste0(method," loop = ",loop))
+    plot(FAdjust[,1],xlab="year/season/fleet",ylab="Optimization Adjustment",col=rep(col_options[seq_along(F_cols)],100*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),100),main = paste0(method," loop = ",loop))
     
-    ?plot
     if(max(abs(1-Fmult1))>=Depletion.Threshold | max(abs(1-Fmult2))>=Annual.F.Threshold | max(abs(1-Fmult3))>=Allocation.Threshold  | loop<10){keepFitting<-TRUE}else{keepFitting<-FALSE}
     
-    forecast_F[,4] <- forecast_F[,4]*Comb_Mult
+    forecast_F[,4] <- forecast_F[,4]*Final_Mult
     forecast_F[fixed_ref,4] <- Fixed_catch_target[,4]
     forecast[["ForeCatch"]] <- forecast_F
     #Write the modified forecast data out to a file and rerun projections
@@ -286,6 +296,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     #If all values have converged check if this is the OFL loop or the P* loop
     if(keepFitting==FALSE){
       if(fitting_depletion==TRUE){
+        method <- "P*"
         #If in the OLF loop then reset to keep fitting and change the target from OFL to P*
         keepFitting <- TRUE
         fitting_depletion <- FALSE
