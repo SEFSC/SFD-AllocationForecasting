@@ -15,14 +15,19 @@
 #                                                                       #
 ##---------------------------------------------------------------------##
 
-#remotes::install_github(repo="r4ss/r4ss",ref="development")
-#library(r4ss)
-#run.projections(assessment_dir="C:/Users/Nathan/Desktop/run25/run25.10", ABC_Fraction=.75, Rebuild_yr=2029)
+# remotes::install_github(repo="r4ss/r4ss",ref="development")
+# library(r4ss)
+# run.projections(assessment_dir="C:/Users/Nathan/Desktop/run25/run25.10", ABC_Fraction=.75, Rebuild_yr=2029)
 
+
+#
 # This is now a generalized function to run projections that should work for most species. 
 # The function is now designed to mostly read out settings from the forecast file the 
 # same way you would generally set things up for a base SS projection.
-# The only additional inputs needed are a 
+# The only additional inputs needed are a proportion for F.ABC relative to F.OFL if 
+# ABC projections are desired and a rebuild target year if rebuilding projections are desired.
+#
+
 run.projections<-function(assessment_dir, #Here you set the location of a previously fit SS stock assessment to perform projections
                           ABC_Fraction = NULL, #Set the ABC target as a fraction of the OFL target if NULL will not fit ABC projections
                           Rebuild_yr = NULL, #Set the rebuild target year if NULL will not fit rebuild projections
