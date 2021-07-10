@@ -415,7 +415,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
         if(!is.null(ABC_Fraction)){
           #If in the OLF loop then reset to keep fitting and change the target from OFL to P*
           loop <- 0
-          method <- "P*"
+          method <- "ABC"
           keepFitting <- TRUE
           fitting_ABC <- TRUE
         }else if(!is.null(Rebuild_yr)){
