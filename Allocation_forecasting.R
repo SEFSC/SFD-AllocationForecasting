@@ -207,7 +207,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
   F_adjust1 <- F_adjust2 <- 1
   F_adjust3 <- rep(1,100*length(seasons)*length(F_cols))
   search_step <- 0.1 
-  Fmult1 <- Fmult2 <- rep(1.1,100*length(seasons)*length(F_cols))
+  Fmult1 <- Fmult2 <- Fmult3 <- rep(1.01,100*length(seasons)*length(F_cols))
   Fmult2a <- Fmult2b <- 1
   First_run<-TRUE
   
