@@ -10,7 +10,7 @@
 ##---------------------------------------------------------------------##
 #                                                                       #
 #  Author: Nathan Vaughan                                               #
-#  Last update date: 7/14/21                                             #
+#  Last update date: 7/22/21                                             #
 #  Contact: nathan.vaughan@noaa.gov                                     #
 #                                                                       #
 ##---------------------------------------------------------------------##
@@ -31,15 +31,25 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
                           Allocation.Threshold = 0.001, # increase them if run is too slow.
                           Step.Threshold = 0.001,
                           rec_devs = rep(0,100), #Input for custom rec_devs and below implementation error needs a vector of 100 values one 
-                          Fcast_impl_error = rep(0,100) #for each year of forecast. Defaults to no rec devs or implementation error.  
+                          Fcast_impl_error = rep(0,100), #for each year of forecast. Defaults to no rec devs or implementation error.  
+                          OFL_complete = FALSE #Set to true if you already have a fit OFL run but want to add or adjust an ABC or Rebuild run
                           ) 
 {
   library(r4ss)
   #Set large max print to avoid issues with writing out a large forecast file.
   options(max.print = 1000000)
   setwd(paste0(assessment_dir))
+  
+  start <- SS_readstarter()
+  dat <- SS_readdat(file = start$datfile, version = 3.3)
+  ctl <- SS_readctl(file = start$ctlfile, version = 3.3, use_datlist = TRUE, datlist = dat)
+  results <- SS_output(dir = getwd(), covar = FALSE, checkcor = FALSE)
+  forecast <- SS_readforecast() 
+  parlist <- SS_readpar_3.30(parfile = "ss.par", datsource = dat, ctlsource = ctl)
+  
   #First set up a working director for running projections in (to avoid overwriting the base files with a failed model run)
   #then copy all of the assessment files to this working folder (ignore any output directories that have been previously created)
+  if(OFL_complete == FALSE){
   if(dir.exists(paste0(assessment_dir,"/Working_dir"))){
     unlink(paste0(assessment_dir,"/Working_dir"), recursive = TRUE)
   }
@@ -50,15 +60,19 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     temp.files <- temp.files[-folders]
   }
   file.copy(from = paste0(assessment_dir,'/',temp.files), to = paste0(assessment_dir,"/Working_dir/",temp.files))
-  
+  }else{
+    temp.files <- list.files(path=paste0(assessment_dir,"/Working_dir"))
+    folders <- c(which(temp.files=="OFL_target"), which(temp.files=="ABC_target"), which(temp.files=="Rebuild_target"), which(temp.files=="Working_dir"))
+    if(length(folders)>0){
+      temp.files <- temp.files[-folders]
+    }
+    unlink(temp.files)
+    temp.files <- list.files(path=paste0(assessment_dir,"/Working_dir/OFL_target"))
+    file.copy(from = paste0(assessment_dir,'/Working_dir/OFL_target/',temp.files), to = paste0(assessment_dir,"/Working_dir/",temp.files))
+  }
   #Set working directory and read in the assessment files
+  
   setwd(paste0(assessment_dir,"/Working_dir"))
-  start <- SS_readstarter()
-  dat <- SS_readdat(file = start$datfile, version = 3.3)
-  ctl <- SS_readctl(file = start$ctlfile, version = 3.3, use_datlist = TRUE, datlist = dat)
-  results <- SS_output(dir = getwd(), covar = FALSE, checkcor = FALSE)
-  forecast <- SS_readforecast() 
-  parlist <- SS_readpar_3.30(parfile = "ss.par", datsource = dat, ctlsource = ctl)
   
   #Modify assessment files to produce expected timeseries length and outputs
   #100 year projections allow equilibrium to be achieved
@@ -181,22 +195,10 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
   forecast[["FirstYear_for_caps_and_allocations"]] <- (dat[["endyr"]]+101)
   #Save all the modified files and then perform a base run of SS so that output is dimensioned correctly with 
   #a 100 year projection series
-  SS_writepar_3.30(parlist = parlist,outfile="ss.par",overwrite = TRUE)
-  SS_writeforecast(mylist=forecast,overwrite = TRUE)
-  SS_writestarter(mylist=start,overwrite = TRUE)
   
-  shell(paste("cd /d ",getwd()," && ss -nohess",sep=""))
-  
-  #Now start a loop of projecting and modifying fixed F's until the desired 
-  #catch projections are achieved
   keepFitting <- TRUE
-  fitting_OFL <- TRUE
-  fitting_ABC <- FALSE
-  fitting_Rebuild <- FALSE
   loop <- 0
   subloop <- 0
-  MSY.Fit <- data.frame(catch=c(0),Ave.F=c(0),depletion=c(0),target.depletion=c(0))
-  method <- "MSY/proxy target"
   if(Forecast_target==2){
     par(mfrow=c(5,2))
   }else{
@@ -208,6 +210,48 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
   Fmult1 <- Fmult2 <- rep(1.1,100*length(seasons)*length(F_cols))
   Fmult2a <- Fmult2b <- 1
   First_run<-TRUE
+  
+  if(OFL_complete == FALSE){
+  SS_writepar_3.30(parlist = parlist,outfile="ss.par",overwrite = TRUE)
+  SS_writeforecast(mylist=forecast,overwrite = TRUE)
+  SS_writestarter(mylist=start,overwrite = TRUE)
+  
+  shell(paste("cd /d ",getwd()," && ss -nohess",sep=""))
+  
+  fitting_OFL <- TRUE
+  fitting_ABC <- FALSE
+  fitting_Rebuild <- FALSE
+  
+  MSY.Fit <- data.frame(catch=c(0),Ave.F=c(0),depletion=c(0),target.depletion=c(0))
+  method <- "OFL"
+  
+  
+  }else{
+    start <- SS_readstarter()
+    dat <- SS_readdat(file = start$datfile, version = 3.3)
+    ctl <- SS_readctl(file = start$ctlfile, version = 3.3, use_datlist = TRUE, datlist = dat)
+    results <- SS_output(dir = getwd(), covar = FALSE, checkcor = FALSE)
+    forecast <- SS_readforecast() 
+    parlist <- SS_readpar_3.30(parfile = "ss.par", datsource = dat, ctlsource = ctl)
+    
+    fitting_OFL <- FALSE
+    if(!is.null(ABC_Fraction)){
+      fitting_ABC <- TRUE
+      fitting_Rebuild <- FALSE
+      method <- "ABC"
+    }else if(!is.null(Rebuild_yr)){
+      fitting_ABC <- FALSE
+      fitting_Rebuild <- TRUE
+      method <- "Rebuild"
+    }else{
+      keepFitting <- FALSE
+      fitting_ABC <- FALSE
+      fitting_Rebuild <- FALSE
+      method <- NULL
+    }
+  }
+  #Now start a loop of projecting and modifying fixed F's until the desired 
+  #catch projections are achieved
   while(keepFitting){
     #Read in the SS results for landings and stock status to determine if desired
     #targets have been achieved
@@ -222,6 +266,18 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     
     TimeFit3 <- aggregate(TimeFit[,sort(c(2,7,8,Catch_cols,F_cols))],by=list(TimeFit$Yr),FUN=sum)[,-2]
     names(TimeFit3)[c(1)] <- c("Yr")
+    
+    if(OFL_complete==TRUE & First_run==TRUE){
+      F_report<-SPRfit$F_report
+      FScale<-mean(F_report[(length(F_report)-9):length(F_report)])
+      F_OFL<-FScale
+      if(!is.null(ABC_Fraction)){
+        F.ABC<-ABC_Fraction*FScale
+      }else{
+        F.ABC<-FScale
+      }
+      First_run<-FALSE
+    }
     
     if(fitting_OFL==TRUE){
       
@@ -279,12 +335,15 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
             }
           
             Target.Depletion <- Target.Depletion+search_step
-            if(min(abs(Target.Depletion-MSY.Fit[,4]))<0.0001){
-              Achieved.Catch <- MSY.Fit[MSY.Fit[,4]==Target.Depletion,1][1]
-              if(Achieved.Catch<Last_Achieved_Catch){
+            
+            min_diff <- which(abs(MSY.Fit[,4]-Target.Depletion)<0.001)
+            if(length(min_diff)>0){
+              Old.Catch <- MSY.Fit[min_diff[1],1]
+              if(Old.Catch<Achieved.Catch){
                 search_step <- -0.5*search_step
               }
               Target.Depletion <- Target.Depletion+search_step
+              Achieved.Catch <- Old.Catch
             }
           }else{
             steps <- seq(0.1,0.9,0.1)
@@ -503,13 +562,13 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
       }else if(fitting_ABC==TRUE){
         fitting_ABC <- FALSE
         if(!is.null(Rebuild_yr)){
-          #If in the P* loop then reset to keep fitting and change the target from P* to Rebuild
+          #If in the ABC loop then reset to keep fitting and change the target from P* to Rebuild
           loop <- 0
           method <- "Rebuild"
           keepFitting <- TRUE
           fitting_Rebuild <- TRUE
         }
-        #If on the P* loop write out the P* results to a new folder (replace any old folder that exists)
+        #If on the ABC loop write out the P* results to a new folder (replace any old folder that exists)
         if(dir.exists(paste0(assessment_dir,"/ABC_target"))){
           unlink(paste0(assessment_dir,"/ABC_target"),recursive = TRUE)
         }
