@@ -66,9 +66,9 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     if(length(folders)>0){
       temp.files <- temp.files[-folders]
     }
-    unlink(temp.files)
-    temp.files <- list.files(path=paste0(assessment_dir,"/Working_dir/OFL_target"))
-    file.copy(from = paste0(assessment_dir,'/Working_dir/OFL_target/',temp.files), to = paste0(assessment_dir,"/Working_dir/",temp.files))
+    unlink(paste0(assessment_dir,"/Working_dir/",temp.files))
+    temp.files <- list.files(path=paste0(assessment_dir,"/OFL_target"))
+    file.copy(from = paste0(assessment_dir,'/OFL_target/',temp.files), to = paste0(assessment_dir,"/Working_dir/",temp.files))
   }
   #Set working directory and read in the assessment files
   
@@ -199,11 +199,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
   keepFitting <- TRUE
   loop <- 0
   subloop <- 0
-  if(Forecast_target==2){
-    par(mfrow=c(5,2))
-  }else{
-    par(mfrow=c(4,2))
-  }
+  
   F_adjust1 <- F_adjust2 <- 1
   F_adjust3 <- rep(1,100*length(seasons)*length(F_cols))
   search_step <- 0.1 
@@ -249,6 +245,12 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
       fitting_Rebuild <- FALSE
       method <- NULL
     }
+  }
+  
+  if(Forecast_target==2 & fitting_OFL==TRUE){
+    par(mfrow=c(5,2))
+  }else{
+    par(mfrow=c(4,2))
   }
   #Now start a loop of projecting and modifying fixed F's until the desired 
   #catch projections are achieved
@@ -413,7 +415,13 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
       Rebuild.Scale <- min(Rebuild.Scale,FScale)
     }
     
-    Fmult2 <- FScale/SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))]
+    zero_catch <- which(SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))]==0)
+    if(length(zero_catch)>0){
+      Fmult2[zero_catch] <- 1
+      Fmult2[-zero_catch] <- FScale/SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))][-zero_catch]
+    }else{
+      Fmult2 <- FScale/SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))]
+    }
     
     if(fitting_Rebuild==TRUE){
       Fmult2[rebuild_ref] <- Rebuild.Scale/SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))][rebuild_ref]
@@ -509,7 +517,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     Fmult2[fixed_ref] <- 1
     Fmult3[fixed_ref] <- 1
     Comb_Mult <- Fmult1*Fmult2*Fmult3
-    Comb_Mult <- pmin(pmax(0.2,Comb_Mult),2)
+    #Comb_Mult <- pmin(pmax(0.2,Comb_Mult),2)
                    
     Last_Mult1 <- DepletionScale
     Last_Mult2 <- mean(Fmult2[-fixed_ref])
