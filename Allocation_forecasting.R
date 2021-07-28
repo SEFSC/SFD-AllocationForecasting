@@ -10,7 +10,7 @@
 ##---------------------------------------------------------------------##
 #                                                                       #
 #  Author: Nathan Vaughan                                               #
-#  Last update date: 7/22/21                                             #
+#  Last update date: 7/28/21                                             #
 #  Contact: nathan.vaughan@noaa.gov                                     #
 #                                                                       #
 ##---------------------------------------------------------------------##
@@ -297,13 +297,17 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
       
       if(Forecast_target==1){
         search_step<-0.00001
-        Target.Depletion <- Target.Rebuild <- forecast[["SPRtarget"]]
+        Target.Depletion <- forecast[["SPRtarget"]]
         Depletion<-SPRfit$SPR
         
         Achieved.Depletion <- mean(Depletion[(length(Depletion)-9):length(Depletion)])
         DepletionScale <- (1-Target.Depletion)/(1-Achieved.Depletion)
         
         DepletionScale <- (-log(1-((1-exp(-FScale))*DepletionScale))/FScale)
+        
+        Depletion_R<-TimeFit3$SpawnBio/Virgin_bio
+        Target.Rebuild <- mean(Depletion_R[(length(Depletion_R)-9):length(Depletion_R)])
+        
       }else if(Forecast_target==2){
         Depletion <- TimeFit3$SpawnBio/Virgin_bio
         Achieved.Depletion <- mean(Depletion[(length(Depletion)-9):length(Depletion)])
@@ -388,30 +392,11 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
       FScale<-F_OFL
       F_report<-SPRfit$F_report
       F_Rebuild_Scale<-F_report[SPRfit$Yr==Rebuild_yr]
-      
-      if(Forecast_target==1){
-        
-        Depletion<-SPRfit$SPR
-        
-        Achieved.Rebuild <- mean(Depletion[SPRfit$Yr==Rebuild_yr])
-        Rebuild.Scale <- (1-Target.Rebuild)/(1-Achieved.Rebuild)
-        Rebuild.Scale <- (-log(1-((1-exp(-F_Rebuild_Scale))*Rebuild.Scale))/F_Rebuild_Scale)
-        Rebuild.Scale <- Rebuild.Scale*F_Rebuild_Scale
-      }else if(Forecast_target==2){
-        Depletion<-TimeFit3$SpawnBio/Virgin_bio
-        
-        Achieved.Rebuild <- mean(Depletion[SPRfit$Yr==Rebuild_yr])
-        Rebuild.Scale <- (1-Target.Rebuild)/(1-Achieved.Rebuild)
-        Rebuild.Scale <- (-log(1-((1-exp(-F_Rebuild_Scale))*Rebuild.Scale))/F_Rebuild_Scale)
-        Rebuild.Scale <- Rebuild.Scale*F_Rebuild_Scale
-      }else if(Forecast_target==3){
-        Depletion<-TimeFit3$SpawnBio/Virgin_bio
-        
-        Achieved.Rebuild <- mean(Depletion[SPRfit$Yr==Rebuild_yr])
-        Rebuild.Scale <- (1-Target.Rebuild)/(1-Achieved.Rebuild)
-        Rebuild.Scale <- (-log(1-((1-exp(-F_Rebuild_Scale))*Rebuild.Scale))/F_Rebuild_Scale)
-        Rebuild.Scale <- Rebuild.Scale*F_Rebuild_Scale
-      }
+      Depletion<-TimeFit3$SpawnBio/Virgin_bio
+      Achieved.Rebuild <- mean(Depletion[SPRfit$Yr==Rebuild_yr])
+      Rebuild.Scale <- (1-Target.Rebuild)/(1-Achieved.Rebuild)
+      Rebuild.Scale <- (-log(1-((1-exp(-F_Rebuild_Scale))*Rebuild.Scale))/F_Rebuild_Scale)
+      Rebuild.Scale <- Rebuild.Scale*F_Rebuild_Scale
       Rebuild.Scale <- min(Rebuild.Scale,FScale)
     }
     
