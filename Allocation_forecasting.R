@@ -27,8 +27,8 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
                           Rebuild_yr = NULL, #Set the rebuild target year if NULL will not fit rebuild projections
                           F_max = FALSE, #If true and forecast method is Fmsy will replace Fmsy with Fmax search (maximum yield per recruit)
                           Depletion.Threshold = 0.001, # These are all just thresholds for when 
-                          Annual.F.Threshold = 0.001, # targets are acceptably achieved these default to a .01% change
-                          Allocation.Threshold = 0.001, # increase them if run is too slow.
+                          Annual.F.Threshold = 0.001, # targets are acceptably achieved these default to a .1% change
+                          Allocation.Threshold = 0.001, # increase them if run is too slow or reduce to improve fit if run is fast.
                           Step.Threshold = 0.001,
                           rec_devs = rep(0,100), #Input for custom rec_devs and below implementation error needs a vector of 100 values one 
                           Fcast_impl_error = rep(0,100), #for each year of forecast. Defaults to no rec devs or implementation error.  
