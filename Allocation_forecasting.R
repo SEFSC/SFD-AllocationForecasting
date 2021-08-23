@@ -10,7 +10,7 @@
 ##---------------------------------------------------------------------##
 #                                                                       #
 #  Author: Nathan Vaughan                                               #
-#  Last update date: 7/28/21                                             #
+#  Last update date: 8/23/21                                             #
 #  Contact: nathan.vaughan@noaa.gov                                     #
 #                                                                       #
 ##---------------------------------------------------------------------##
@@ -40,6 +40,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
   options(max.print = 1000000)
   setwd(paste0(assessment_dir))
   
+  #Read in all the model files and results 
   start <- SS_readstarter()
   dat <- SS_readdat(file = start$datfile, version = 3.3)
   ctl <- SS_readctl(file = start$ctlfile, version = 3.3, use_datlist = TRUE, datlist = dat)
@@ -70,17 +71,18 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     temp.files <- list.files(path=paste0(assessment_dir,"/OFL_target"))
     file.copy(from = paste0(assessment_dir,'/OFL_target/',temp.files), to = paste0(assessment_dir,"/Working_dir/",temp.files))
   }
-  #Set working directory and read in the assessment files
   
+  #Set the new working directory 
   setwd(paste0(assessment_dir,"/Working_dir"))
   
   #Modify assessment files to produce expected timeseries length and outputs
-  #100 year projections allow equilibrium to be achieved
+  #100 year projections to allow equilibrium to be achieved
   forecast$Nforecastyrs <- 100
-  parlist$recdev_forecast <- matrix(NA, nrow = 100, ncol = 2)
-  parlist$Fcast_impl_error <- matrix(NA, nrow = 100, ncol = 2)
+  
   #Need to set recdevs and implementation error for all projection years 
   #so that reading from par file is possible
+  parlist$recdev_forecast <- matrix(NA, nrow = 100, ncol = 2)
+  parlist$Fcast_impl_error <- matrix(NA, nrow = 100, ncol = 2)
   parlist$recdev_forecast[,1] <- (dat[["endyr"]]+1):(dat[["endyr"]]+100)
   parlist$Fcast_impl_error[,1] <- (dat[["endyr"]]+1):(dat[["endyr"]]+100)
   parlist$recdev_forecast[,2] <- rec_devs
@@ -102,8 +104,8 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
   
   #Get the timeseries of historic/projected catches and F
   TimeFit <- results$timeseries
-  #TimeFit <- TimeFit[TimeFit[,"Yr"]>dat[["endyr"]],]
   
+  #Identify the column numbers for Catch, F, SSB, Recruits, etc
   Catch_cols <- grep("retain(B)", names(TimeFit), fixed = TRUE)
   F_cols <- grep("F", names(TimeFit), fixed = TRUE)
   
@@ -136,6 +138,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     stop("forecast should be set to either 1, 2, or 3 so we know what the target is")
   }
   
+  #Build a projection forcast matrix of F values by fleet/season/year which will adjusted to achieve target stock status, F, and allocations.
   forecast_F<-matrix(1,nrow=100*length(seasons)*length(F_cols),ncol=5)
   forecast_F[,1]<-sort(rep((dat[["endyr"]]+1):(dat[["endyr"]]+100),length(seasons)*length(F_cols)))
   forecast_F[,2]<-rep(seasons,100*length(F_cols))
@@ -148,7 +151,8 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
   colnames(forecast_F)<-c("Year","Seas","Fleet","Catch or F","Basis")
   
   
-  #Extract fixed forecast values from the forecast file these will be fixed at these values
+  #Extract fixed forecast values from the forecast file these will be fixed at these values for the projections
+  #This is used to implement recent catches or fixed harvest from an independent fleet such as shrimp bycatch.
   if(!is.null(forecast[["ForeCatch"]])){
     Fixed_catch_basis <- forecast[["InputBasis"]]
     Fixed_catch_target <- forecast[["ForeCatch"]]
@@ -165,10 +169,14 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     }
   }
   
+  #Replace the temporary average F values with specified fixed inputs
   forecast_F[fixed_ref,c(4,5)]<-Fixed_catch_target[,c(4,5)]
   
+  #This reference identifies inputs subject to a rebuilding period F 
   rebuild_ref <- which(forecast_F[,1]<=Rebuild_yr)
   
+  #Here all input values are assigned to an allocation group if needed and
+  #relative landings targets are identified
   n_groups <- forecast[["N_allocation_groups"]]
   groups <- rep(0,length(F_cols))
   Allocations <- forecast_F[,c(1,2,3,4,5,5)]
@@ -189,12 +197,11 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     }
   }
   
+  
   forecast[["Forecast"]] <- 4
   forecast[["InputBasis"]] <- -1
   forecast[["ForeCatch"]] <- forecast_F
   forecast[["FirstYear_for_caps_and_allocations"]] <- (dat[["endyr"]]+101)
-  #Save all the modified files and then perform a base run of SS so that output is dimensioned correctly with 
-  #a 100 year projection series
   
   keepFitting <- TRUE
   loop <- 0
@@ -208,21 +215,27 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
   First_run<-TRUE
   
   if(OFL_complete == FALSE){
-  SS_writepar_3.30(parlist = parlist,outfile="ss.par",overwrite = TRUE)
-  SS_writeforecast(mylist=forecast,overwrite = TRUE)
-  SS_writestarter(mylist=start,overwrite = TRUE)
-  
-  shell(paste("cd /d ",getwd()," && ss -nohess",sep=""))
-  
-  fitting_OFL <- TRUE
-  fitting_ABC <- FALSE
-  fitting_Rebuild <- FALSE
-  
-  MSY.Fit <- data.frame(catch=c(0),Ave.F=c(0),depletion=c(0),target.depletion=c(0))
-  method <- "OFL"
-  
+    #Save all the modified files and then perform a base run of SS so that output is specified correctly with 
+    #a 100 year projection series.
+    
+    SS_writepar_3.30(parlist = parlist,outfile="ss.par",overwrite = TRUE)
+    SS_writeforecast(mylist=forecast,overwrite = TRUE)
+    SS_writestarter(mylist=start,overwrite = TRUE)
+    
+    shell(paste("cd /d ",getwd()," && ss -nohess",sep=""))
+    
+    #Begin the search in the OFL phase
+    fitting_OFL <- TRUE
+    fitting_ABC <- FALSE
+    fitting_Rebuild <- FALSE
+    
+    MSY.Fit <- data.frame(catch=c(0),Ave.F=c(0),depletion=c(0),target.depletion=c(0))
+    method <- "OFL"
+    
   
   }else{
+    #Save all the modified files and then set search to begin in ABC or Rebuild phase
+    
     start <- SS_readstarter()
     dat <- SS_readdat(file = start$datfile, version = 3.3)
     ctl <- SS_readctl(file = start$ctlfile, version = 3.3, use_datlist = TRUE, datlist = dat)
@@ -247,13 +260,17 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     }
   }
   
+  #Set up plot window for production of search diagnostic plots depending on target specifications
+  #These plots were largely for diagnostic testing during code development but can allow you to see what
+  #is going wrong if a future bug does occur.
   if(Forecast_target==2 & fitting_OFL==TRUE){
     par(mfrow=c(5,2))
   }else{
     par(mfrow=c(4,2))
   }
+  
   #Now start a loop of projecting and modifying fixed F's until the desired 
-  #catch projections are achieved
+  #landings projections are achieved
   while(keepFitting){
     #Read in the SS results for landings and stock status to determine if desired
     #targets have been achieved
@@ -269,9 +286,10 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     TimeFit3 <- aggregate(TimeFit[,sort(c(2,7,8,Catch_cols,F_cols))],by=list(TimeFit$Yr),FUN=sum)[,-2]
     names(TimeFit3)[c(1)] <- c("Yr")
     
+    #If reading in results of a previous OFL run then set the F_OFL and F.ABC values before begining ABC/Rebuild loops
     if(OFL_complete==TRUE & First_run==TRUE){
       F_report<-SPRfit$F_report
-      FScale<-mean(F_report[(length(F_report)-9):length(F_report)])
+      FScale<-median(F_report[(length(F_report)-89):length(F_report)])
       F_OFL<-FScale
       if(!is.null(ABC_Fraction)){
         F.ABC<-ABC_Fraction*FScale
@@ -287,7 +305,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
       #to achieve equal F in every year. As depletion approaches the target value this 
       #F will approach F(OFL).
       F_report<-SPRfit$F_report
-      FScale<-mean(F_report[(length(F_report)-9):length(F_report)])
+      FScale<-median(F_report[(length(F_report)-89):length(F_report)])
       F_OFL<-FScale
       if(!is.null(ABC_Fraction)){
         F.ABC<-ABC_Fraction*FScale
@@ -295,12 +313,13 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
         F.ABC<-FScale
       }
       
+      #Calculate depletion target adjustment scale depending on the specified target (SPR ratio, SSB ratio, or true MSY)   
       if(Forecast_target==1){
         search_step<-0.00001
         Target.Depletion <- forecast[["SPRtarget"]]
         Depletion<-SPRfit$SPR
         
-        Achieved.Depletion <- mean(Depletion[(length(Depletion)-9):length(Depletion)])
+        Achieved.Depletion <- median(Depletion[(length(Depletion)-29):length(Depletion)])
         DepletionScale <- (1-Target.Depletion)/(1-Achieved.Depletion)
         
         DepletionScale <- (-log(1-((1-exp(-FScale))*DepletionScale))/FScale)
@@ -310,7 +329,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
         
       }else if(Forecast_target==2){
         Depletion <- TimeFit3$SpawnBio/Virgin_bio
-        Achieved.Depletion <- mean(Depletion[(length(Depletion)-9):length(Depletion)])
+        Achieved.Depletion <- median(Depletion[(length(Depletion)-29):length(Depletion)])
         if(First_run == TRUE){
           Target.Depletion <- Achieved.Depletion
           First_run <- FALSE
@@ -378,18 +397,18 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
         Target.Depletion <- Target.Rebuild <- forecast[["Btarget"]]
         Depletion<-TimeFit3$SpawnBio/Virgin_bio
 
-        Achieved.Depletion <- mean(Depletion[(length(Depletion)-9):length(Depletion)])
+        Achieved.Depletion <- median(Depletion[(length(Depletion)-29):length(Depletion)])
         DepletionScale <- (1-Target.Depletion)/(1-Achieved.Depletion)
         DepletionScale <- (-log(1-((1-exp(-FScale))*DepletionScale))/FScale)
       }
     }else if(fitting_ABC==TRUE){
-      search_step<-0.00001
-      DepletionScale<-1
-      FScale<-F.ABC
+      search_step<-0.00001 #Set search step to small value so it doesn't trigger continued loops this value is only needed during the OFL MSY search
+      DepletionScale<-1 #Set depletion scale to 1 so it doesn't trigger continued loops now that OFL search is complete
+      FScale<-F.ABC #Set the F target to F.ABC for rescaling annual F values
     }else if(fitting_Rebuild==TRUE){
-      search_step<-0.00001
-      DepletionScale<-1
-      FScale<-F_OFL
+      search_step<-0.00001 #Set search step to small value so it doesn't trigger continued loops this value is only needed during the OFL MSY search
+      DepletionScale<-1 #Set depletion scale to 1 so it doesn't trigger continued loops now that OFL search is complete
+      FScale<-F_OFL #Set the F target to F_OFL for rescaling annual F values in years after the rebuild period.
       F_report<-SPRfit$F_report
       F_Rebuild_Scale<-F_report[SPRfit$Yr==Rebuild_yr]
       Depletion<-TimeFit3$SpawnBio/Virgin_bio
@@ -400,6 +419,9 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
       Rebuild.Scale <- min(Rebuild.Scale,FScale)
     }
     
+    #Fmult2 calculations define the multiplier for adjusting annual F values
+    #Zero catch years are identified first to prevent divide by zero errors in the scaling and
+    #allow tell the search the target has been achieved
     zero_catch <- which(SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))]==0)
     if(length(zero_catch)>0){
       Fmult2[zero_catch] <- 1
@@ -407,11 +429,12 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     }else{
       Fmult2 <- FScale/SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))]
     }
-    
+    #If in a rebuild search phase the rebuild years are now adjusted independently of the later F_OFL years
     if(fitting_Rebuild==TRUE){
       Fmult2[rebuild_ref] <- Rebuild.Scale/SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))][rebuild_ref]
     }
     
+    #Here 
     if((loop>1 |  subloop>2) & DepletionScale>0 & fitting_OFL==TRUE & (Forecast_target!=2 | subloop>2)){
       F_adjust1 <- (F_adjust1 + 1)/2
       F_adjust1 <- F_adjust1*(Last_Mult1-1)/(Last_Mult1-DepletionScale)
