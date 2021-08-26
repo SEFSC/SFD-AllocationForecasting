@@ -424,7 +424,11 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     #allow tell the search the target has been achieved
     zero_catch <- which(SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))]==0)
     if(length(zero_catch)>0){
-      Fmult2[zero_catch] <- 1
+      if(FScale==0){
+        Fmult2[zero_catch] <- 1
+      }else{
+        Fmult2[zero_catch] <- 2
+      }
       Fmult2[-zero_catch] <- FScale/SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))][-zero_catch]
     }else{
       Fmult2 <- FScale/SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))]
@@ -451,7 +455,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
       }
     }else if(loop>1 & min(Fmult2)>0 & fitting_ABC==TRUE){
       F_adjust2 <- (F_adjust2 + 1)/2
-      F_adjust2 <- F_adjust2*(Last_Mult2-1)/(Last_Mult2-mean(Fmult2[-fixed_ref]))
+      F_adjust2 <- F_adjust2*(Last_Mult2-1)/(Last_Mult2-median(Fmult2[-fixed_ref]))
       if(F_adjust2 > 0){
         if(length(Fmult2[Fmult2<1])>0){
           Fmult2[Fmult2<1] <- exp(log(Fmult2[Fmult2<1])*F_adjust2)
@@ -463,8 +467,8 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
         F_adjust2 <- 1
       }
     }else if(loop>1 & min(Fmult2)>0 & fitting_Rebuild==TRUE){
-      F_adjust2a <- (Last_Mult2a-1)/(Last_Mult2a-mean(Fmult2[rebuild_ref[which(!is.element(rebuild_ref,fixed_ref))]]))
-      F_adjust2b <- (Last_Mult2b-1)/(Last_Mult2b-mean(Fmult2[-sort(unique(c(fixed_ref,rebuild_ref)))]))
+      F_adjust2a <- (Last_Mult2a-1)/(Last_Mult2a-median(Fmult2[rebuild_ref[which(!is.element(rebuild_ref,fixed_ref))]]))
+      F_adjust2b <- (Last_Mult2b-1)/(Last_Mult2b-median(Fmult2[-sort(unique(c(fixed_ref,rebuild_ref)))]))
       if(!is.na(F_adjust2a)){
       if(F_adjust2a > 0){
         if(exists("Fmult2a")){
@@ -528,9 +532,9 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     #Comb_Mult <- pmin(pmax(0.2,Comb_Mult),2)
                    
     Last_Mult1 <- DepletionScale
-    Last_Mult2 <- mean(Fmult2[-fixed_ref])
-    Last_Mult2a <- mean(Fmult2[rebuild_ref[which(!is.element(rebuild_ref,fixed_ref))]])
-    Last_Mult2b <- mean(Fmult2[-sort(unique(c(fixed_ref,rebuild_ref)))])
+    Last_Mult2 <- median(Fmult2[-fixed_ref])
+    Last_Mult2a <- median(Fmult2[rebuild_ref[which(!is.element(rebuild_ref,fixed_ref))]])
+    Last_Mult2b <- median(Fmult2[-sort(unique(c(fixed_ref,rebuild_ref)))])
     
     col_options <- c("black","dark red","dark green","dark blue","orange","purple","red","green","blue","brown","pink","yellow",colors())
     point_options <- c(16,15,17,18,8,9,10,11,12,13,0,1,2,3,4,5,6,14,21,22,23,24,25,19,20)
@@ -543,6 +547,15 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     
     if(max(abs(1-Fmult1))>=Depletion.Threshold | max(abs(1-Fmult2))>=Annual.F.Threshold | max(abs(1-Fmult3))>=Allocation.Threshold | abs(search_step)>Step.Threshold){keepFitting<-TRUE}else{keepFitting<-FALSE}
     if(FScale==0 & loop>2){keepFitting<-FALSE}
+    
+    zero_Fs <- which(forecast_F[,4]==0)
+    increase_Fs <- which(Comb_Mult>1)
+    if(length(zero_Fs)>0 & length(increase_Fs)>0){
+      mod_Fs <- zero_Fs[is.element(zero_Fs,increase_Fs)]
+      if(length(mod_Fs)>0){
+        forecast_F[mod_Fs,4] <- 0.05
+      }
+    }
     forecast_F[,4] <- forecast_F[,4]*Comb_Mult
     forecast_F[fixed_ref,4] <- Fixed_catch_target[,4]
     forecast[["ForeCatch"]] <- forecast_F
