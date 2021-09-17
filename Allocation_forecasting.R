@@ -421,7 +421,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     
     #Fmult2 calculations define the multiplier for adjusting annual F values
     #Zero catch years are identified first to prevent divide by zero errors in the scaling and
-    #allow tell the search the target has been achieved
+    #to tell the search algorithm that the target has been achieved
     zero_catch <- which(SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))]==0)
     if(length(zero_catch)>0){
       if(FScale==0){
@@ -509,6 +509,9 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     
     Fmult1 <- rep(DepletionScale,100*length(seasons)*length(F_cols))
     
+	#Here the achieved catch fractions by fishing sector and year are calculated and compared relative 
+	#to the target allocations. An adjustment multiplier is then computed to adjust fleet Fs closer to a
+	#value expected to achieve the target allocations.
     if(FScale > 0){               
       if(n_groups>0){
         Catch_temp <- TimeFit3[,Catch_cols3]
@@ -525,6 +528,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     }else{
       Fmult3 <- rep(1,100*length(seasons)*length(F_cols))
     }
+	
     Fmult1[fixed_ref] <- 1
     Fmult2[fixed_ref] <- 1
     Fmult3[fixed_ref] <- 1
