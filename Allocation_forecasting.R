@@ -10,10 +10,31 @@
 ##---------------------------------------------------------------------##
 #                                                                       #
 #  Author: Nathan Vaughan                                               #
-#  Last update date: 8/23/21                                             #
+#  Last update date: 9/19/21                                             #
 #  Contact: nathan.vaughan@noaa.gov                                     #
 #                                                                       #
 ##---------------------------------------------------------------------##
+#
+#   Disclaimer
+#
+#   “The United States Department of Commerce (DOC) GitHub project code 
+#    is provided on an ‘as is’ basis and the user assumes responsibility 
+#    for its use. DOC has relinquished control of the information and no 
+#    longer has responsibility to protect the integrity, confidentiality, 
+#    or availability of the information. Any claims against the Department 
+#    of Commerce stemming from the use of its GitHub project will be 
+#    governed by all applicable Federal law. Any reference to specific 
+#    commercial products, processes, or services by service mark, trademark, 
+#    manufacturer, or otherwise, does not constitute or imply their endorsement, 
+#    recommendation or favoring by the Department of Commerce. The Department 
+#    of Commerce seal and logo, or the seal and logo of a DOC bureau, shall 
+#    not be used in any manner to imply endorsement of any commercial 
+#    product or activity by DOC or the United States Government.”
+#
+#
+##                                                                       #
+##---------------------------------------------------------------------##
+##
 
 # This is now a generalized function to run projections that should work for most species. 
 # The function is now designed to mostly read out settings from the forecast file the 
@@ -336,11 +357,14 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
         }
         Target.Rebuild <- Target.Depletion
         
-        if(max(abs(1-Fmult3))>Allocation.Threshold | max(abs(1-Fmult2))>Annual.F.Threshold | max(abs(1-Fmult1))>Depletion.Threshold){
+        if(max(abs(1-Fmult3))>Allocation.Threshold | 
+		   max(abs(1-Fmult2))>Annual.F.Threshold | 
+		   max(abs(1-Fmult1))>Depletion.Threshold){
           loop<-loop-1
           subloop<-subloop+1
           if(F_max==TRUE){
-            Achieved.Catch <- sum(TimeFit3[(length(TimeFit3[,1])-9):length(TimeFit3[,1]),Catch_cols3])/sum(TimeFit3[(length(TimeFit3[,1])-9):length(TimeFit3[,1]),"Recruit_0"])
+            Achieved.Catch <- sum(TimeFit3[(length(TimeFit3[,1])-9):length(TimeFit3[,1]),Catch_cols3])/
+			                  sum(TimeFit3[(length(TimeFit3[,1])-9):length(TimeFit3[,1]),"Recruit_0"])
           }else{
             Achieved.Catch <- sum(TimeFit3[(length(TimeFit3[,1])-9):length(TimeFit3[,1]),Catch_cols3])
           }
@@ -348,7 +372,8 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
         }else{
           subloop<-0
           if(F_max==TRUE){
-            Achieved.Catch <- sum(TimeFit3[(length(TimeFit3[,1])-9):length(TimeFit3[,1]),Catch_cols3])/sum(TimeFit3[(length(TimeFit3[,1])-9):length(TimeFit3[,1]),"Recruit_0"])
+            Achieved.Catch <- sum(TimeFit3[(length(TimeFit3[,1])-9):length(TimeFit3[,1]),Catch_cols3])/
+			                  sum(TimeFit3[(length(TimeFit3[,1])-9):length(TimeFit3[,1]),"Recruit_0"])
           }else{
             Achieved.Catch <- sum(TimeFit3[(length(TimeFit3[,1])-9):length(TimeFit3[,1]),Catch_cols3])
           }
@@ -382,13 +407,17 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
         }
         DepletionScale <- (1-Target.Depletion)/(1-Achieved.Depletion)
         if(F_max==TRUE){
-          plot(x=TimeFit3[,"Yr"],y=apply(TimeFit3[,Catch_cols3],1,sum)/TimeFit3[,"Recruit_0"],xlab="year",ylab="Total Yield Per Recruit",main = paste0(method," loop = ",loop,".",subloop))
-          plot(x=MSY.Fit[,"depletion"],y=MSY.Fit[,"catch"],xlim=c(0.9*min(MSY.Fit[,3:4]),1.1*max(MSY.Fit[,3:4])),xlab="Esimated depletion",ylab="Total Yield Per Recruit",main = paste0(method," loop = ",loop,".",subloop))
+          plot(x=TimeFit3[,"Yr"],y=apply(TimeFit3[,Catch_cols3],1,sum)/TimeFit3[,"Recruit_0"],
+		       xlab="year",ylab="Total Yield Per Recruit",main = paste0(method," loop = ",loop,".",subloop))
+          plot(x=MSY.Fit[,"depletion"],y=MSY.Fit[,"catch"],xlim=c(0.9*min(MSY.Fit[,3:4]),1.1*max(MSY.Fit[,3:4])),
+		       xlab="Esimated depletion",ylab="Total Yield Per Recruit",main = paste0(method," loop = ",loop,".",subloop))
           lines(x=c(MSY.Fit[1,c(4,4)]),y=c(0,2*max(MSY.Fit[,"catch"])),col="dark red")
           points(x=MSY.Fit[1,3],y=MSY.Fit[1,1],pch=16,col="dark blue")
         }else{
-          plot(x=TimeFit3[,"Yr"],y=apply(TimeFit3[,Catch_cols3],1,sum),xlab="year",ylab="Total Yield",main = paste0(method," loop = ",loop,".",subloop))
-          plot(x=MSY.Fit[,"depletion"],y=MSY.Fit[,"catch"],xlim=c(0.9*min(MSY.Fit[,3:4]),1.1*max(MSY.Fit[,3:4])),xlab="Esimated depletion",ylab="Total Yield",main = paste0(method," loop = ",loop,".",subloop))
+          plot(x=TimeFit3[,"Yr"],y=apply(TimeFit3[,Catch_cols3],1,sum),
+		       xlab="year",ylab="Total Yield",main = paste0(method," loop = ",loop,".",subloop))
+          plot(x=MSY.Fit[,"depletion"],y=MSY.Fit[,"catch"],xlim=c(0.9*min(MSY.Fit[,3:4]),1.1*max(MSY.Fit[,3:4])),
+		       xlab="Esimated depletion",ylab="Total Yield",main = paste0(method," loop = ",loop,".",subloop))
           lines(x=c(MSY.Fit[1,c(4,4)]),y=c(0,2*max(MSY.Fit[,"catch"])),col="dark red")
           points(x=MSY.Fit[1,3],y=MSY.Fit[1,1],pch=16,col="dark blue")
         }
@@ -438,7 +467,9 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
       Fmult2[rebuild_ref] <- Rebuild.Scale/SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))][rebuild_ref]
     }
     
-    #Here 
+    #Here a range of adjustments are made to the F step sizes based on the expected vs achieved change in F from
+    #the previous step. i.e. if the last change only had half the impact expected on F then the next step will
+    #be modified to make the next change in F twice as large as the raw change in F estimated.
     if((loop>1 |  subloop>2) & DepletionScale>0 & fitting_OFL==TRUE & (Forecast_target!=2 | subloop>2)){
       F_adjust1 <- (F_adjust1 + 1)/2
       F_adjust1 <- F_adjust1*(Last_Mult1-1)/(Last_Mult1-DepletionScale)
@@ -529,17 +560,22 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
       Fmult3 <- rep(1,100*length(seasons)*length(F_cols))
     }
 	
+	#Adjust any multipliers of fixed catch values to 1 so that the 
+    #search algorithm will consider them to have achieved their target	
     Fmult1[fixed_ref] <- 1
     Fmult2[fixed_ref] <- 1
     Fmult3[fixed_ref] <- 1
     Comb_Mult <- Fmult1*Fmult2*Fmult3
-    #Comb_Mult <- pmin(pmax(0.2,Comb_Mult),2)
-                   
+    
+    #Record the previous adjustment values so they can be used to optimize 
+    #step sizes to speed up target convergence	
     Last_Mult1 <- DepletionScale
     Last_Mult2 <- median(Fmult2[-fixed_ref])
     Last_Mult2a <- median(Fmult2[rebuild_ref[which(!is.element(rebuild_ref,fixed_ref))]])
     Last_Mult2b <- median(Fmult2[-sort(unique(c(fixed_ref,rebuild_ref)))])
     
+	#Plot out progess in achieving targets. This is primarily for diagnosis of a 
+	#run that is failing to converge on an answer in a reasonable period of time.
     col_options <- c("black","dark red","dark green","dark blue","orange","purple","red","green","blue","brown","pink","yellow",colors())
     point_options <- c(16,15,17,18,8,9,10,11,12,13,0,1,2,3,4,5,6,14,21,22,23,24,25,19,20)
     plot(Fmult1,xlab="year/season/fleet",ylab="Depletion Adjustment",col=rep(col_options[seq_along(F_cols)],100*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),100),main = paste0(method," loop = ",loop))
@@ -549,9 +585,15 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     plot(Fmult3,xlab="year/season/fleet",ylab="Allocation Adjustment",col=rep(col_options[seq_along(F_cols)],100*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),100),main = paste0(method," loop = ",loop))
     plot(F_adjust3,xlab="year/season/fleet",ylab="Allocation Optimization Adjustment",col=rep(col_options[seq_along(F_cols)],100*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),100),main = paste0(method," loop = ",loop))
     
+	#Check if all targets have been achieved and if so stop fitting
     if(max(abs(1-Fmult1))>=Depletion.Threshold | max(abs(1-Fmult2))>=Annual.F.Threshold | max(abs(1-Fmult3))>=Allocation.Threshold | abs(search_step)>Step.Threshold){keepFitting<-TRUE}else{keepFitting<-FALSE}
     if(FScale==0 & loop>2){keepFitting<-FALSE}
     
+	#Here we check that no Fs have been reduced to zero that need some catch
+	#If that has occured repace the zero F with a small starting value 0.05 so that the 
+	#search algorithm can act on it to achieve the true target value.
+	#This is needed if the ABC loop was used to perform a zero catch run and then 
+	#rebuild run is performed starting from those zero values
     zero_Fs <- which(forecast_F[,4]==0)
     increase_Fs <- which(Comb_Mult>1)
     if(length(zero_Fs)>0 & length(increase_Fs)>0){
@@ -560,6 +602,9 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
         forecast_F[mod_Fs,4] <- 0.05
       }
     }
+	#Now adjust the previous F values by the estimated multiplier to create a 
+	#new estimate of the target Fs, make sure to overwrite any fixed catches 
+	#with their original values.
     forecast_F[,4] <- forecast_F[,4]*Comb_Mult
     forecast_F[fixed_ref,4] <- Fixed_catch_target[,4]
     forecast[["ForeCatch"]] <- forecast_F
@@ -567,13 +612,13 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     unlink(paste0(getwd(),"/forecast.ss"))
     SS_writeforecast(mylist=forecast,overwrite = TRUE)
     shell(paste("cd /d ",getwd()," && ss -nohess",sep=""))
-    #If all values have converged check if this is the OFL loop or the P* loop
+    #If all values have converged check if this is the OFL, ABC, or Rebuild loop
     if(keepFitting==FALSE){
       if(fitting_OFL==TRUE){
         fitting_OFL <- FALSE
         par(mfrow=c(4,2))
         if(!is.null(ABC_Fraction)){
-          #If in the OLF loop then reset to keep fitting and change the target from OFL to P*
+          #If in the OLF loop then reset to keep fitting and change the target from OFL to ABC
           loop <- 0
           method <- "ABC"
           keepFitting <- TRUE
@@ -595,7 +640,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
       }else if(fitting_ABC==TRUE){
         fitting_ABC <- FALSE
         if(!is.null(Rebuild_yr)){
-          #If in the ABC loop then reset to keep fitting and change the target from P* to Rebuild
+          #If in the ABC loop then reset to keep fitting and change the target from ABC to Rebuild
           loop <- 0
           method <- "Rebuild"
           keepFitting <- TRUE
