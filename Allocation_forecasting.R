@@ -318,6 +318,9 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
         F.ABC<-FScale
       }
       First_run<-FALSE
+      Depletion<-TimeFit3$SpawnBio/Virgin_bio
+      Target.Depletion <- median(Depletion[(length(Depletion)-29):length(Depletion)])
+      Target.Rebuild <- median(Depletion[(length(Depletion)-29):length(Depletion)])
     }
     
     if(fitting_OFL==TRUE){
