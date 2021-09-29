@@ -423,7 +423,8 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
         }
       }else if(Forecast_target==3){
         search_step<-0.00001
-        Target.Depletion <- Target.Rebuild <- forecast[["Btarget"]]
+        Target.Depletion <- forecast[["Btarget"]]
+        Target.Rebuild <- forecast[["Btarget"]]
         Depletion<-TimeFit3$SpawnBio/Virgin_bio
 
         Achieved.Depletion <- median(Depletion[(length(Depletion)-29):length(Depletion)])
