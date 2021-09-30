@@ -355,7 +355,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
         Depletion <- TimeFit3$SpawnBio/Virgin_bio
         Achieved.Depletion <- median(Depletion[(length(Depletion)-29):length(Depletion)])
         if(First_run == TRUE){
-          Target.Depletion <- Achieved.Depletion
+          Target.Depletion <- 0.2
           First_run <- FALSE
         }
         Target.Rebuild <- Target.Depletion
