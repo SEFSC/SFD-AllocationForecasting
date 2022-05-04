@@ -284,7 +284,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     
     shell(paste("cd /d ",getwd()," && ss -nohess",sep=""))
     
-    #Begin the search in the OFL phase
+    #Begin the search in the Benchmark phase
     fitting_Benchmark <- TRUE
     fitting_OFL <- FALSE
     fitting_ABC <- FALSE
@@ -296,7 +296,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     
   
   }else{
-    #Save all the modified files and then set search to begin in ABC or Rebuild phase
+    #Save all the modified files and then set search to begin in OFL phase 
     
     start <- SS_readstarter()
     dat <- SS_readdat(file = start$datfile, version = 3.3)
@@ -310,6 +310,9 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     
     fitting_Benchmark <- FALSE
     fitting_OFL <- TRUE
+	fitting_ABC <- FALSE
+    fitting_Rebuild <- FALSE
+    fitting_F0 <- FALSE
     method <- "OFL"
     
     # if(!is.null(ABC_Fraction)){
