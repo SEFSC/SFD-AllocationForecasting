@@ -59,8 +59,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
  
   projection_results <- list()
   #Removed these as inputs as they are not needed yet, could add back to input options later
-  rec_devs = rep(0,100) #Input for custom rec_devs and below implementation error needs a vector of 100 values one 
-  Fcast_impl_error = rep(0,100) #for each year of forecast. Defaults to no rec devs or implementation error.  
+  
   
   library(r4ss)
   #Set large max print to avoid issues with writing out a large forecast file.
@@ -115,15 +114,27 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
   
   #Need to set recdevs and implementation error for all projection years 
   #so that reading from par file is possible
-  parlist$recdev_forecast <- matrix(NA, nrow = 100, ncol = 2)
-  parlist$recdev_forecast[,1] <- (dat[["endyr"]]+1):(dat[["endyr"]]+100)
-  parlist$recdev_forecast[,2] <- rec_devs
-  colnames(parlist$recdev_forecast) <- c("year","recdev")
+  expected_forecast_rec_length <- length((min(dat[["endyr"]],ctl[["MainRdevYrLast"]])+1):(dat[["endyr"]]+forecast$Nforecastyrs))
+  if(!is.null(parlist$recdev_forecast)){
+    if(length(parlist$recdev_forecast[,1])!=expected_forecast_rec_length){
+      temp_recs<-parlist$recdev_forecast[,2]
+      parlist$recdev_forecast <- matrix(NA, nrow = expected_forecast_rec_length, ncol = 2)
+      parlist$recdev_forecast[,1] <- (min(dat[["endyr"]],ctl[["MainRdevYrLast"]])+1):(dat[["endyr"]]+forecast$Nforecastyrs)
+      parlist$recdev_forecast[,2] <- rep(0,expected_forecast_rec_length)
+      parlist$recdev_forecast[1:length(temp_recs),2] <- temp_recs
+      colnames(parlist$recdev_forecast) <- c("year","recdev")
+    }
+  }else{
+    parlist$recdev_forecast <- matrix(NA, nrow = expected_forecast_rec_length, ncol = 2)
+    parlist$recdev_forecast[,1] <- (min(dat[["endyr"]],ctl[["MainRdevYrLast"]])+1):(dat[["endyr"]]+forecast$Nforecastyrs)
+    parlist$recdev_forecast[,2] <- rep(0,expected_forecast_rec_length)
+    colnames(parlist$recdev_forecast) <- c("year","recdev")
+  }
   
   if(!is.null(parlist$Fcast_impl_error)){
-    parlist$Fcast_impl_error <- matrix(NA, nrow = 100, ncol = 2)
-    parlist$Fcast_impl_error[,1] <- (dat[["endyr"]]+1):(dat[["endyr"]]+100)
-    parlist$Fcast_impl_error[,2] <- Fcast_impl_error
+    parlist$Fcast_impl_error <- matrix(NA, nrow = forecast$Nforecastyrs, ncol = 2)
+    parlist$Fcast_impl_error[,1] <- (dat[["endyr"]]+1):(dat[["endyr"]]+forecast$Nforecastyrs)
+    parlist$Fcast_impl_error[,2] <- rep(0,forecast$Nforecastyrs)
     colnames(parlist$Fcast_impl_error) <- c("year","impl_error")
   }
   
