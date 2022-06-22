@@ -107,9 +107,9 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
   
   #If fitting the Benchmark/OFL values then save the specified recruitment source for catches 
   #and set to 0 (S/R curve) in order to first calculate benchmarks
-  catch_rec <- forecast$Forecast_loop_control_3
+  catch_rec <- forecast$fcast_rec_option
   if(Benchmark_complete==FALSE){
-    forecast$Forecast_loop_control_3 <- 0
+    forecast$fcast_rec_option <- 0
   }
   
   #Need to set recdevs and implementation error for all projection years 
@@ -316,7 +316,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     forecast <- SS_readforecast() 
     parlist <- SS_readpar_3.30(parfile = "ss.par", datsource = dat, ctlsource = ctl)
     
-    forecast$Forecast_loop_control_3 <- catch_rec
+    forecast$fcast_rec_option <- catch_rec
     SS_writeforecast(mylist=forecast,overwrite = TRUE)
     
     fitting_Benchmark <- FALSE
@@ -342,7 +342,8 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     #   fitting_F0 <- TRUE
     #   method <- "F=0"
     # }else{
-    #   keepFitting <- FALSE
+    #   
+    keepFitting <- FALSE
     #   fitting_ABC <- FALSE
     #   fitting_Rebuild <- FALSE
     #   method <- ""
@@ -695,6 +696,8 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     #Here a range of adjustments are made to the F step sizes based on the expected vs achieved change in F from
     #the previous step. i.e. if the last change only had half the impact expected on F then the next step will
     #be modified to make the next change in F twice as large as the raw change in F estimated.
+    
+    
     if((loop>1 |  subloop>2) & DepletionScale>0 & DepletionScale!=1 & fitting_Benchmark==TRUE & (Forecast_target!=2 | subloop>2)){
       F_adjust1 <- (F_adjust1 + 1)/2
       F_adjust1 <- F_adjust1*(Last_Mult1-1)/(Last_Mult1-DepletionScale)
@@ -873,7 +876,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
         temp.files <- list.files(path=paste0(assessment_dir,"/Working_dir"))
         file.copy(from=paste0(assessment_dir,'/Working_dir/',temp.files),to=paste0(assessment_dir,"/Benchmark_target/",temp.files))
         
-        forecast$Forecast_loop_control_3 <- catch_rec 
+        forecast$fcast_rec_option <- catch_rec 
         SS_writeforecast(mylist=forecast,overwrite = TRUE)
       }else if(fitting_OFL==TRUE){
         fitting_OFL <- FALSE
