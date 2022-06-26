@@ -56,7 +56,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
                           Make_plots = FALSE #Should plots be created (this is useful for diagnostics but can cause annoying errors if plot window is small)
                           ) 
 {
- 
+
   projection_results <- list()
   #Removed these as inputs as they are not needed yet, could add back to input options later
   
@@ -273,7 +273,9 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
   forecast[["InputBasis"]] <- -1
   forecast[["ForeCatch"]] <- forecast_F
   forecast[["FirstYear_for_caps_and_allocations"]] <- (dat[["endyr"]]+101)
-  
+  if(forecast[["stddev_of_log_catch_ratio"]]==0){
+    forecast[["stddev_of_log_catch_ratio"]]<-0.001
+  }
   keepFitting <- TRUE
   loop <- 0
   subloop <- 0
@@ -321,7 +323,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     
     fitting_Benchmark <- FALSE
     fitting_OFL <- TRUE
-	fitting_ABC <- FALSE
+	  fitting_ABC <- FALSE
     fitting_Rebuild <- FALSE
     fitting_F0 <- FALSE
     method <- "OFL"
