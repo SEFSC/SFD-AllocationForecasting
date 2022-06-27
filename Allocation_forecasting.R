@@ -136,6 +136,13 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     parlist$Fcast_impl_error[,1] <- (dat[["endyr"]]+1):(dat[["endyr"]]+forecast$Nforecastyrs)
     parlist$Fcast_impl_error[,2] <- rep(0,forecast$Nforecastyrs)
     colnames(parlist$Fcast_impl_error) <- c("year","impl_error")
+    if(forecast[["stddev_of_log_catch_ratio"]]==0){
+      forecast[["stddev_of_log_catch_ratio"]]<-0.001
+    }
+  }else{
+    if(forecast[["stddev_of_log_catch_ratio"]]>0){
+      forecast[["stddev_of_log_catch_ratio"]]<-0
+    }
   }
   
   #Adjust the starter file to read from par file, perform no fitting (This should already have been done),
@@ -273,9 +280,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
   forecast[["InputBasis"]] <- -1
   forecast[["ForeCatch"]] <- forecast_F
   forecast[["FirstYear_for_caps_and_allocations"]] <- (dat[["endyr"]]+101)
-  if(forecast[["stddev_of_log_catch_ratio"]]==0){
-    forecast[["stddev_of_log_catch_ratio"]]<-0.001
-  }
+  
   keepFitting <- TRUE
   loop <- 0
   subloop <- 0
