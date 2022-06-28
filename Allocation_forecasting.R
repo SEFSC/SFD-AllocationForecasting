@@ -350,7 +350,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     #   method <- "F=0"
     # }else{
     #   
-    keepFitting <- FALSE
+    # keepFitting <- FALSE
     #   fitting_ABC <- FALSE
     #   fitting_Rebuild <- FALSE
     #   method <- ""
