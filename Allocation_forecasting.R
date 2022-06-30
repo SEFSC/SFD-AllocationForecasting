@@ -156,26 +156,49 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
   start$F_report_units <- 1
   start$F_report_basis <- 0
   
-  
   #Get the timeseries of historic/projected catches and F
   TimeFit <- results$timeseries
   
   #Identify the column numbers for Catch, F, SSB, Recruits, etc
   Catch_cols <- grep("retain(B)", names(TimeFit), fixed = TRUE)
+  Dead_cols <- grep("dead(B)", names(TimeFit), fixed = TRUE)
+  CatchN_cols <- grep("retain(N)", names(TimeFit), fixed = TRUE)
+  DeadN_cols <- grep("dead(N)", names(TimeFit), fixed = TRUE)
   F_cols <- grep("F", names(TimeFit), fixed = TRUE)
   
-  TimeFit2 <- aggregate(TimeFit[,sort(c(2,4,7,Catch_cols,F_cols))],by=list(TimeFit$Yr,TimeFit$Seas),FUN=sum)[,-c(3,4,5)]
+  TimeFit2 <- aggregate(TimeFit[,sort(c(2,4,7,Catch_cols,Dead_cols,CatchN_cols,DeadN_cols,F_cols))],by=list(TimeFit$Yr,TimeFit$Seas),FUN=sum)[,-c(3,4,5)]
   names(TimeFit2)[c(1,2)] <- c("Yr", "Seas")
   
   Catch_cols2 <- grep("retain(B)", names(TimeFit2), fixed = TRUE)
+  Dead_cols2 <- grep("dead(B)", names(TimeFit2), fixed = TRUE)
+  CatchN_cols2 <- grep("retain(N)", names(TimeFit2), fixed = TRUE)
+  DeadN_cols2 <- grep("dead(N)", names(TimeFit2), fixed = TRUE)
   F_cols2 <- grep("F", names(TimeFit2), fixed = TRUE)
   
-  TimeFit3 <- aggregate(TimeFit[,sort(c(2,7,8,Catch_cols,F_cols))],by=list(TimeFit$Yr),FUN=sum)[,-2]
+  TimeFit3 <- aggregate(TimeFit[,sort(c(2,7,8,Catch_cols,Dead_cols,CatchN_cols,DeadN_cols,F_cols))],by=list(TimeFit$Yr),FUN=sum)[,-2]
   names(TimeFit3)[c(1)] <- c("Yr")
   Virgin_bio <- TimeFit3$SpawnBio[1]
   
   Catch_cols3 <- grep("retain(B)", names(TimeFit3), fixed = TRUE)
+  Dead_cols3 <- grep("dead(B)", names(TimeFit3), fixed = TRUE)
+  CatchN_cols3 <- grep("retain(N)", names(TimeFit3), fixed = TRUE)
+  DeadN_cols3 <- grep("dead(N)", names(TimeFit3), fixed = TRUE)
   F_cols3 <- grep("F", names(TimeFit3), fixed = TRUE)
+  
+  achieved.report <- TimeFit2[0,1:8]
+  colnames(achieved.report)<-c("Year","Seas","Fleet","retain(B)","dead(B)","retain(N)","dead(N)","F")
+  for(i in 1:length(F_cols2)){
+    temp.data <- TimeFit2[,1:8]
+    temp.data[,3] <- i 
+    temp.data[,4] <- TimeFit2[,Catch_cols2[i]]
+    temp.data[,5] <- TimeFit2[,Dead_cols2[i]]
+    temp.data[,6] <- TimeFit2[,CatchN_cols2[i]]
+    temp.data[,7] <- TimeFit2[,DeadN_cols2[i]]
+    temp.data[,8] <- TimeFit2[,F_cols2[i]]
+    colnames(temp.data)<-c("Year","Seas","Fleet","retain(B)","dead(B)","retain(N)","dead(N)","F")
+    achieved.report <- rbind(achieved.report,temp.data)
+  }
+  achieved.report<-achieved.report[order(achieved.report$Year,achieved.report$Seas,achieved.report$Fleet),]
   
   #Set all future projections to fish at constant apical F that matches recent years
   #get the years of timeseries F's based on the forecast year range
@@ -332,29 +355,6 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     fitting_Rebuild <- FALSE
     fitting_F0 <- FALSE
     method <- "OFL"
-    
-    # if(!is.null(ABC_Fraction)){
-    #   fitting_ABC <- TRUE
-    #   fitting_Rebuild <- FALSE
-    #   fitting_F0 <- FALSE
-    #   method <- "ABC"
-    # }else if(!is.null(Rebuild_yr)){
-    #   fitting_ABC <- FALSE
-    #   fitting_Rebuild <- TRUE
-    #   fitting_F0 <- FALSE
-    #   method <- "Rebuild"
-    # }else if(Calc_F_0==TRUE){
-    #   fitting_ABC <- FALSE
-    #   fitting_Rebuild <- FALSE
-    #   fitting_F0 <- TRUE
-    #   method <- "F=0"
-    # }else{
-    #   
-    # keepFitting <- FALSE
-    #   fitting_ABC <- FALSE
-    #   fitting_Rebuild <- FALSE
-    #   method <- ""
-    # }
   }
   
   #Set up plot window for production of search diagnostic plots depending on target specifications
@@ -382,8 +382,47 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
       plot(SPRfit[SPRfit[,"Yr"]>=dat[["endyr"]],"F_report"],xlab="year",ylab="F",main = paste0(method," loop = ",loop))
       plot(SPRfit[SPRfit[,"Yr"]>=dat[["endyr"]],"Deplete"],xlab="year",ylab="Depletion",main = paste0(method," loop = ",loop))
     }
-    TimeFit3 <- aggregate(TimeFit[,sort(c(2,7,8,Catch_cols,F_cols))],by=list(TimeFit$Yr),FUN=sum)[,-2]
+    
+    #Identify the column numbers for Catch, F, SSB, Recruits, etc
+    Catch_cols <- grep("retain(B)", names(TimeFit), fixed = TRUE)
+    Dead_cols <- grep("dead(B)", names(TimeFit), fixed = TRUE)
+    CatchN_cols <- grep("retain(N)", names(TimeFit), fixed = TRUE)
+    DeadN_cols <- grep("dead(N)", names(TimeFit), fixed = TRUE)
+    F_cols <- grep("F", names(TimeFit), fixed = TRUE)
+    
+    TimeFit2 <- aggregate(TimeFit[,sort(c(2,4,7,Catch_cols,Dead_cols,CatchN_cols,DeadN_cols,F_cols))],by=list(TimeFit$Yr,TimeFit$Seas),FUN=sum)[,-c(3,4,5)]
+    names(TimeFit2)[c(1,2)] <- c("Yr", "Seas")
+    
+    Catch_cols2 <- grep("retain(B)", names(TimeFit2), fixed = TRUE)
+    Dead_cols2 <- grep("dead(B)", names(TimeFit2), fixed = TRUE)
+    CatchN_cols2 <- grep("retain(N)", names(TimeFit2), fixed = TRUE)
+    DeadN_cols2 <- grep("dead(N)", names(TimeFit2), fixed = TRUE)
+    F_cols2 <- grep("F", names(TimeFit2), fixed = TRUE)
+    
+    TimeFit3 <- aggregate(TimeFit[,sort(c(2,7,8,Catch_cols,Dead_cols,CatchN_cols,DeadN_cols,F_cols))],by=list(TimeFit$Yr),FUN=sum)[,-2]
     names(TimeFit3)[c(1)] <- c("Yr")
+    Virgin_bio <- TimeFit3$SpawnBio[1]
+    
+    Catch_cols3 <- grep("retain(B)", names(TimeFit3), fixed = TRUE)
+    Dead_cols3 <- grep("dead(B)", names(TimeFit3), fixed = TRUE)
+    CatchN_cols3 <- grep("retain(N)", names(TimeFit3), fixed = TRUE)
+    DeadN_cols3 <- grep("dead(N)", names(TimeFit3), fixed = TRUE)
+    F_cols3 <- grep("F", names(TimeFit3), fixed = TRUE)
+    
+    achieved.report <- TimeFit2[0,1:8]
+    colnames(achieved.report)<-c("Year","Seas","Fleet","retain(B)","dead(B)","retain(N)","dead(N)","F")
+    for(i in 1:length(F_cols2)){
+      temp.data <- TimeFit2[,1:8]
+      temp.data[,3] <- i 
+      temp.data[,4] <- TimeFit2[,Catch_cols2[i]]
+      temp.data[,5] <- TimeFit2[,Dead_cols2[i]]
+      temp.data[,6] <- TimeFit2[,CatchN_cols2[i]]
+      temp.data[,7] <- TimeFit2[,DeadN_cols2[i]]
+      temp.data[,8] <- TimeFit2[,F_cols2[i]]
+      colnames(temp.data)<-c("Year","Seas","Fleet","retain(B)","dead(B)","retain(N)","dead(N)","F")
+      achieved.report <- rbind(achieved.report,temp.data)
+    }
+    achieved.report<-achieved.report[order(achieved.report$Year,achieved.report$Seas,achieved.report$Fleet),]
     
     if(fitting_Rebuild==TRUE){
       terminal_year <- length(SPRfit$Yr[SPRfit$Yr<=Rebuild_yr])+5
@@ -416,8 +455,6 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
       
       Achieved.Catch.equil <- sum(TimeFit3[(length(TimeFit3[,1])-9):length(TimeFit3[,1]),Catch_cols3])/10
       
-      
-      
       if(n_groups>1){
         projection_results[["Group_Catch_Benchmark"]]<-list()
         for(i in 1:n_groups){
@@ -449,13 +486,20 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
       projection_results[["Recruitment_Benchmark"]] <- Achieved.Rec
     }
     
+    
+    
+    if(max(abs(achieved.report[,'F']-forecast_F[,"Catch or F"])[-fixed_ref])>0.1){
+      forecast_F[,4] <- forecast_F[,4]*0.5
+    }else {
     if(fitting_Benchmark==TRUE){
       
       #Calculate the average F at equilibrium that all F's will be scaled to in order
       #to achieve equal F in every year. As depletion approaches the target value this 
       #F will approach F(OFL).
+        
       F_report<-SPRfit$F_report
       FScale<-median(F_report[(length(F_report)-89):length(F_report)])
+      FScale<- max(FScale,0.0001)
       F_OFL<-FScale
       if(!is.null(ABC_Fraction)){
         F.ABC<-ABC_Fraction*FScale
@@ -503,6 +547,9 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
         Depletion<-SPRfit$SPR
         
         Achieved.Depletion <- median(Depletion[(length(Depletion)-29):length(Depletion)])
+        
+        Achieved.Depletion <- min(Achieved.Depletion,.9)
+        
         DepletionScale <- (1-Target.Depletion)/(1-Achieved.Depletion)
         
         DepletionScale <- (-log(1-((1-exp(-FScale))*DepletionScale))/FScale)
@@ -513,6 +560,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
       }else if(Forecast_target==2){
         Depletion <- TimeFit3$SpawnBio/Virgin_bio
         Achieved.Depletion <- median(Depletion[(length(Depletion)-29):length(Depletion)])
+        Achieved.Depletion <- min(Achieved.Depletion,.9)
         if(First_run == TRUE){
           Target.Depletion <- 0.2
           First_run <- FALSE
@@ -592,6 +640,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
         Depletion<-TimeFit3$SpawnBio/Virgin_bio
 
         Achieved.Depletion <- median(Depletion[(length(Depletion)-29):length(Depletion)])
+        Achieved.Depletion <- min(Achieved.Depletion,.9)
         DepletionScale <- (1-Target.Depletion)/(1-Achieved.Depletion)
         DepletionScale <- (-log(1-((1-exp(-FScale))*DepletionScale))/FScale)
       }
@@ -691,13 +740,22 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
       }else{
         Fmult2[zero_catch] <- 2
       }
-      Fmult2[-zero_catch] <- FScale/SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))][-zero_catch]
+      temp_F <- SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))][-zero_catch]
+      temp_F[temp_F>1.5] <- 1.5
+      temp_F[temp_F<(min(0.001,FScale))] <- min(0.001,FScale)
+      Fmult2[-zero_catch] <- FScale/temp_F
     }else{
-      Fmult2 <- FScale/SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))]
+      temp_F <- SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))]
+      temp_F[temp_F>1.5] <- 1.5
+      temp_F[temp_F<(min(0.001,FScale))] <- min(0.001,FScale)
+      Fmult2 <- FScale/temp_F
     }
     #If in a rebuild search phase the rebuild years are now adjusted independently of the later F_OFL years
     if(fitting_Rebuild==TRUE){
-      Fmult2[adjusted_Rebuild_F_Rebuild] <- Rebuild.Scale/SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))][adjusted_Rebuild_F_Rebuild]
+      temp_F <- SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))][adjusted_Rebuild_F_Rebuild]
+      temp_F[temp_F>1.5] <- 1.5
+      temp_F[temp_F<(min(0.001,Rebuild.Scale))] <- min(0.001,Rebuild.Scale)
+      Fmult2[adjusted_Rebuild_F_Rebuild] <- Rebuild.Scale/temp_F
     }
     
     #Here a range of adjustments are made to the F step sizes based on the expected vs achieved change in F from
@@ -853,10 +911,12 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
         Comb_Mult[mod_Fs] <- 1
       }
     }
+    forecast_F[,4] <- forecast_F[,4]*Comb_Mult
+   } 
 	#Now adjust the previous F values by the estimated multiplier to create a 
 	#new estimate of the target Fs, make sure to overwrite any fixed catches 
 	#with their original values.
-    forecast_F[,4] <- forecast_F[,4]*Comb_Mult
+    
     if(!is.null(fixed_ref)){
       forecast_F[fixed_ref,4] <- Fixed_catch_target[,4]
     }
