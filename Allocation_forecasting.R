@@ -131,7 +131,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     colnames(parlist$recdev_forecast) <- c("year","recdev")
   }
   
-  if(!is.null(parlist$Fcast_impl_error)){
+  # if(!is.null(parlist$Fcast_impl_error)){
     parlist$Fcast_impl_error <- matrix(NA, nrow = forecast$Nforecastyrs, ncol = 2)
     parlist$Fcast_impl_error[,1] <- (dat[["endyr"]]+1):(dat[["endyr"]]+forecast$Nforecastyrs)
     parlist$Fcast_impl_error[,2] <- rep(0,forecast$Nforecastyrs)
@@ -139,11 +139,11 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     if(forecast[["stddev_of_log_catch_ratio"]]==0){
       forecast[["stddev_of_log_catch_ratio"]]<-0.001
     }
-  }else{
-    if(forecast[["stddev_of_log_catch_ratio"]]>0){
-      forecast[["stddev_of_log_catch_ratio"]]<-0
-    }
-  }
+  # }else{
+  #   if(forecast[["stddev_of_log_catch_ratio"]]>0){
+  #     forecast[["stddev_of_log_catch_ratio"]]<-0
+  #   }
+  # }
   
   #Adjust the starter file to read from par file, perform no fitting (This should already have been done),
   #and set the depletion value to be relative to unexploited biomass and have no scaling 
