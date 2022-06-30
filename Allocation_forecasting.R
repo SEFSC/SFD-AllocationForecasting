@@ -490,6 +490,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     
     if(max(abs(achieved.report[,'F']-forecast_F[,"Catch or F"])[-fixed_ref])>0.1){
       forecast_F[,4] <- forecast_F[,4]*0.5
+      loop <- loop - 1
     }else {
     if(fitting_Benchmark==TRUE){
       
