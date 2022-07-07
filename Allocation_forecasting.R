@@ -136,14 +136,9 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     parlist$Fcast_impl_error[,1] <- (dat[["endyr"]]+1):(dat[["endyr"]]+forecast$Nforecastyrs)
     parlist$Fcast_impl_error[,2] <- rep(0,forecast$Nforecastyrs)
     colnames(parlist$Fcast_impl_error) <- c("year","impl_error")
-    if(forecast[["stddev_of_log_catch_ratio"]]==0){
-      forecast[["stddev_of_log_catch_ratio"]]<-0.001
-    }
-  # }else{
-  #   if(forecast[["stddev_of_log_catch_ratio"]]>0){
-  #     forecast[["stddev_of_log_catch_ratio"]]<-0
-  #   }
-  # }
+  if(forecast[["stddev_of_log_catch_ratio"]]==0){
+    forecast[["stddev_of_log_catch_ratio"]]<-0.001
+  }
   
   #Adjust the starter file to read from par file, perform no fitting (This should already have been done),
   #and set the depletion value to be relative to unexploited biomass and have no scaling 
@@ -401,7 +396,6 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     
     TimeFit3 <- aggregate(TimeFit[,sort(c(2,7,8,Catch_cols,Dead_cols,CatchN_cols,DeadN_cols,F_cols))],by=list(TimeFit$Yr),FUN=sum)[,-2]
     names(TimeFit3)[c(1)] <- c("Yr")
-    Virgin_bio <- TimeFit3$SpawnBio[1]
     
     Catch_cols3 <- grep("retain(B)", names(TimeFit3), fixed = TRUE)
     Dead_cols3 <- grep("dead(B)", names(TimeFit3), fixed = TRUE)
@@ -639,7 +633,6 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
         Target.Depletion <- forecast[["Btarget"]]
         Target.Rebuild <- forecast[["Btarget"]]
         Depletion<-TimeFit3$SpawnBio/Virgin_bio
-
         Achieved.Depletion <- median(Depletion[(length(Depletion)-29):length(Depletion)])
         Achieved.Depletion <- min(Achieved.Depletion,.9)
         DepletionScale <- (1-Target.Depletion)/(1-Achieved.Depletion)
