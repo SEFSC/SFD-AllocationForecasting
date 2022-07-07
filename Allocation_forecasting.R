@@ -494,7 +494,6 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
         
       F_report<-SPRfit$F_report
       FScale<-median(F_report[(length(F_report)-89):length(F_report)])
-      FScale<- max(FScale,0.0001)
       F_OFL<-FScale
       if(!is.null(ABC_Fraction)){
         F.ABC<-ABC_Fraction*FScale
@@ -543,11 +542,25 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
         
         Achieved.Depletion <- median(Depletion[(length(Depletion)-29):length(Depletion)])
         
-        Achieved.Depletion <- min(Achieved.Depletion,.9)
+        Achieved.Depletion <- min(Achieved.Depletion,max(Target.Depletion,0.9))
         
         DepletionScale <- (1-Target.Depletion)/(1-Achieved.Depletion)
         
-        DepletionScale <- (-log(1-((1-exp(-FScale))*DepletionScale))/FScale)
+        if(FScale==0){
+          if(DepletionScale<=1.0001){
+            DepletionScale<-1
+          }else{
+            FScale<-0.0001
+            F_OFL<-FScale
+            if(!is.null(ABC_Fraction)){
+              F.ABC<-ABC_Fraction*FScale
+            }else{
+              F.ABC<-FScale
+            }
+          }
+        }else{
+          DepletionScale <- (-log(1-((1-exp(-FScale))*DepletionScale))/FScale)
+        }
         
         Depletion_R<-TimeFit3$SpawnBio/Virgin_bio
         Target.Rebuild <- median(Depletion_R[(length(Depletion_R)-9):length(Depletion_R)])
@@ -611,6 +624,21 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
           Last_Achieved_Catch <- Achieved.Catch
         }
         DepletionScale <- (1-Target.Depletion)/(1-Achieved.Depletion)
+        
+        if(FScale==0){
+          if(DepletionScale<=1.0001){
+            DepletionScale<-1
+          }else{
+            FScale<-0.0001
+            F_OFL<-FScale
+            if(!is.null(ABC_Fraction)){
+              F.ABC<-ABC_Fraction*FScale
+            }else{
+              F.ABC<-FScale
+            }
+          }
+        }
+        
         if(Make_plots==TRUE){
           if(F_max==TRUE){
             plot(x=TimeFit3[,"Yr"],y=apply(TimeFit3[,Catch_cols3,drop=FALSE],1,sum)/TimeFit3[,"Recruit_0"],
@@ -634,9 +662,25 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
         Target.Rebuild <- forecast[["Btarget"]]
         Depletion<-TimeFit3$SpawnBio/Virgin_bio
         Achieved.Depletion <- median(Depletion[(length(Depletion)-29):length(Depletion)])
-        Achieved.Depletion <- min(Achieved.Depletion,.9)
+        Achieved.Depletion <- min(Achieved.Depletion,max(0.9,Target.Depletion))
         DepletionScale <- (1-Target.Depletion)/(1-Achieved.Depletion)
-        DepletionScale <- (-log(1-((1-exp(-FScale))*DepletionScale))/FScale)
+        
+        if(FScale==0){
+          if(DepletionScale<=1.0001){
+            DepletionScale<-1
+          }else{
+            FScale<-0.0001
+            F_OFL<-FScale
+            if(!is.null(ABC_Fraction)){
+              F.ABC<-ABC_Fraction*FScale
+            }else{
+              F.ABC<-FScale
+            }
+          }
+        }else{
+          DepletionScale <- (-log(1-((1-exp(-FScale))*DepletionScale))/FScale)
+        }
+        
       }
     }else if(fitting_OFL==TRUE){
       search_step<-0.00001 #Set search step to small value so it doesn't trigger continued loops this value is only needed during the Benchmark MSY search
@@ -703,11 +747,13 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
       F_Rebuild_Scale<-F_report[SPRfit$Yr==Rebuild_yr]
       Depletion<-TimeFit3$SpawnBio/Virgin_bio
       Achieved.Rebuild <- mean(Depletion[SPRfit$Yr==Rebuild_yr])
-      Rebuild.Scale <- (1-Target.Rebuild)/(1-Achieved.Rebuild)
-      Rebuild.Scale <- (-log(1-((1-exp(-F_Rebuild_Scale))*Rebuild.Scale))/F_Rebuild_Scale)
-      Rebuild.Scale <- Rebuild.Scale*F_Rebuild_Scale
-      Rebuild.Scale <- min(Rebuild.Scale,FScale)
       
+      Rebuild.Scale <- (1-Target.Rebuild)/(1-Achieved.Rebuild)
+      Rebuild.Ratio <- Rebuild.Scale
+      Rebuild.Scale <- min(-log(1-((1-exp(-F_Rebuild_Scale))*Rebuild.Scale)),FScale)
+      if(Rebuild.Scale < 0.00001 & Rebuild.Ratio < 1){
+        Rebuild.Scale <- 0
+      }
       if(n_groups>1){
         projection_results[["Group_Catch_Rebuild"]]<-list()
         for(i in 1:n_groups){
@@ -731,13 +777,16 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     if(length(zero_catch)>0){
       if(FScale==0){
         Fmult2[zero_catch] <- 1
+        Fmult2[-zero_catch] <- 0
       }else{
         Fmult2[zero_catch] <- 2
+        temp_F <- SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))][-zero_catch]
+        temp_F[temp_F>1.5] <- 1.5
+        temp_F[temp_F<(min(0.001,FScale))] <- min(0.001,FScale)
+        Fmult2[-zero_catch] <- FScale/temp_F
       }
-      temp_F <- SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))][-zero_catch]
-      temp_F[temp_F>1.5] <- 1.5
-      temp_F[temp_F<(min(0.001,FScale))] <- min(0.001,FScale)
-      Fmult2[-zero_catch] <- FScale/temp_F
+    }else if(FScale==0){
+      Fmult2[] <- 0
     }else{
       temp_F <- SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))]
       temp_F[temp_F>1.5] <- 1.5
@@ -747,9 +796,24 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     #If in a rebuild search phase the rebuild years are now adjusted independently of the later F_OFL years
     if(fitting_Rebuild==TRUE){
       temp_F <- SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))][adjusted_Rebuild_F_Rebuild]
-      temp_F[temp_F>1.5] <- 1.5
-      temp_F[temp_F<(min(0.001,Rebuild.Scale))] <- min(0.001,Rebuild.Scale)
-      Fmult2[adjusted_Rebuild_F_Rebuild] <- Rebuild.Scale/temp_F
+      zero_rebuild <- which(temp_F==0)
+      if(length(zero_rebuild)>0){
+        if(Rebuild.Scale==0){
+          Fmult2[adjusted_Rebuild_F_Rebuild[zero_rebuild]] <- 1
+          Fmult2[adjusted_Rebuild_F_Rebuild[-zero_rebuild]] <- 0
+        }else{
+          Fmult2[adjusted_Rebuild_F_Rebuild[zero_rebuild]] <- 2
+          temp_F[temp_F>1.5] <- 1.5
+          temp_F[temp_F<(min(0.001,Rebuild.Scale))] <- min(0.001,Rebuild.Scale)
+          Fmult2[adjusted_Rebuild_F_Rebuild[-zero_rebuild]] <- Rebuild.Scale/temp_F[-zero_rebuild]
+        }
+      }else if(Rebuild.Scale==0){
+        Fmult2[adjusted_Rebuild_F_Rebuild] <- 0
+      }else{
+        temp_F[temp_F>1.5] <- 1.5
+        temp_F[temp_F<(min(0.001,Rebuild.Scale))] <- min(0.001,Rebuild.Scale)
+        Fmult2[adjusted_Rebuild_F_Rebuild] <- Rebuild.Scale/temp_F
+      }
     }
     
     #Here a range of adjustments are made to the F step sizes based on the expected vs achieved change in F from
@@ -856,7 +920,12 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     }else{
       Fmult3 <- rep(1,100*length(seasons)*length(F_cols))
     }
-	
+	  
+    if(fitting_Rebuild==TRUE){
+      if(Rebuild.Scale==0){
+          Fmult3[adjusted_Rebuild_F_Rebuild] <- 1
+        }
+    }
 	#Adjust any multipliers of fixed catch values to 1 so that the 
     #search algorithm will consider them to have achieved their target	
     Fmult1[fixed_ref] <- 1
