@@ -58,7 +58,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
                           Calc_Hessian = FALSE, #Should the hessian inversion be completed for runs once converged. TODO: NOT YET IMPLEMENTED!!!
                           Do_Pstar = FALSE, #If TRUE then ABC_Fraction above will instead be the P* probability of overfishing limit for ABC calculation. TODO: NOT YET IMPLEMENTED!!!
                           Years_report = 20, #How many years of projection to include in stored OFL and ABC reporting. (All forecast years data will still be available in report file) 
-                          Years_projection = 50, #How many years of projection to run (need enough to reach equilibrium) 100 is safe but may not be sufficient for some long lived species.
+                          Years_projection = 100, #How many years of projection to run (need enough to reach equilibrium) 100 is safe but may not be sufficient for some long lived species.
                           run_in_MSE = FALSE,
                           starting_Forecatch = NULL
                           ) 
