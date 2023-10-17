@@ -64,11 +64,12 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
                           ) 
 {
   
+  projection_results <- list()
+  
   tryCatch({
   
   #SSMSE::report_message("Running the allocation forecasting function.") 
   
-  projection_results <- list()
   #Removed these as inputs as they are not needed yet, could add back to input options later
  
   oldwd<-getwd()
@@ -1412,7 +1413,6 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     }
   }
   setwd(oldwd)
-  return(projection_results)
   
   },
   error=function(cond) {
@@ -1422,4 +1422,6 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     # Choose a return value in case of error
     return(NA)
   })
+  
+  return(projection_results)
 }
