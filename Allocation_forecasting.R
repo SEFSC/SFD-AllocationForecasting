@@ -60,13 +60,14 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
                           Years_report = 20, #How many years of projection to include in stored OFL and ABC reporting. (All forecast years data will still be available in report file) 
                           Years_projection = 100, #How many years of projection to run (need enough to reach equilibrium) 100 is safe but may not be sufficient for some long lived species.
                           run_in_MSE = FALSE,
-                          starting_Forecatch = NULL
+                          starting_Forecatch = NULL,
+                          MSY_step = 0.1
                           ) 
 {
   
   projection_results <- list()
   
-  tryCatch({
+  
   
   #SSMSE::report_message("Running the allocation forecasting function.") 
   
@@ -252,7 +253,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     forecast_F<-matrix(1,nrow=forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols),ncol=5)
     forecast_F[,1]<-sort(rep((dat[["endyr"]]+1):(dat[["endyr"]]+forecast[["Nforecastyrs"]]),length(seasons)*length(F_cols)))
     forecast_F[,2]<-rep(sort(rep(seasons,length(F_cols))),forecast[["Nforecastyrs"]])
-    forecast_F[,3]<-rep(1:length(F_cols),forecast[["Nforecastyrs"]]*(length(seasons)))
+    forecast_F[,3]<-rep(sort(which(dat$fleetinfo$type!=3)),forecast[["Nforecastyrs"]]*(length(seasons)))
     for(i in seasons){
       forecast_F[forecast_F[,2]==i,4]<-unlist(rep(F_by_Fleet_seas[F_by_Fleet_seas[,1]==i,-1],forecast[["Nforecastyrs"]]))
       forecast_F[forecast_F[,2]==i,5]<-rep(99,length(F_cols)*forecast[["Nforecastyrs"]])
@@ -340,7 +341,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     }
     
     for(i in 1:n_groups){
-      fleets_by_group[[i]]<-which(groups==i)
+      fleets_by_group[[i]]<-which(is.element(which(dat$fleetinfo$type!=3),which(groups==i)))
     }
   }
   
@@ -356,7 +357,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
   
   F_adjust1 <- F_adjust2 <- 1
   F_adjust3 <- rep(1,forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols))
-  search_step <- 0.1 
+  search_step <- MSY_step 
   Fmult1 <- Fmult2 <- Fmult3 <- Fmult4 <- rep(1.01,forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols))
   Fmult2a <- Fmult2b <- 1
   First_run<-TRUE
@@ -451,6 +452,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     SPRfit <- SPRfit[SPRfit[,"Yr"]>dat[["endyr"]],]
     loop <- loop + 1
     if(Make_plots==TRUE){
+      par(mar=c(4,3,3,2))
       plot(SPRfit[SPRfit[,"Yr"]>=dat[["endyr"]],"F_report"],xlab="year",ylab="F",main = paste0(method," loop = ",loop))
       plot(SPRfit[SPRfit[,"Yr"]>=dat[["endyr"]],"Deplete"],xlab="year",ylab="Depletion",main = paste0(method," loop = ",loop))
     }
@@ -683,7 +685,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
         Achieved.Depletion <- median(Depletion[(length(Depletion)-29):length(Depletion)])
         Achieved.Depletion <- min(Achieved.Depletion,.9)
         if(First_run == TRUE){
-          Target.Depletion <- 0.2
+          Target.Depletion <- forecast[["Btarget"]]
           First_run <- FALSE
         }
         Target.Rebuild <- Target.Depletion
@@ -753,6 +755,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
         }
         
         if(Make_plots==TRUE){
+          par(mar=c(4,3,3,2))
           if(F_max==TRUE){
             plot(x=TimeFit3[,"Yr"],y=apply(TimeFit3[,Catch_cols3,drop=FALSE],1,sum)/TimeFit3[,"Recruit_0"],
   		       xlab="year",ylab="Total Yield Per Recruit",main = paste0(method," loop = ",loop,".",subloop))
@@ -1049,11 +1052,11 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     if(FScale > 0){               
       if(n_groups>0){
         Catch_temp <- TimeFit3[,Catch_cols3]
-        Catch_tot <- apply(Catch_temp[,which(groups!=0),drop=FALSE],1,sum)
+        Catch_tot <- apply(Catch_temp[,unlist(fleets_by_group),drop=FALSE],1,sum)
         for(i in 1:n_groups){
           sort.mat <- matrix(NA, nrow = forecast[["Nforecastyrs"]]*length(seasons)*length(which(groups==i)), ncol = 2)
           sort.mat[,1] <- rep(1:forecast[["Nforecastyrs"]],length(seasons)*length(which(groups==i)))
-          sort.mat[,2] <- rep(apply(Catch_temp[,which(groups==i),drop=FALSE],1,sum)/Catch_tot,length(seasons)*length(which(groups==i)))
+          sort.mat[,2] <- rep(apply(Catch_temp[,fleets_by_group[[i]],drop=FALSE],1,sum)/Catch_tot,length(seasons)*length(which(groups==i)))
           sort.mat <- sort.mat[order(sort.mat[,1]),]
           Allocations[Allocations[,4]==i,6] <- sort.mat[,2]
         }
@@ -1100,6 +1103,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
 	#Plot out progess in achieving targets. This is primarily for diagnosis of a 
 	#run that is failing to converge on an answer in a reasonable period of time.
     if(Make_plots==TRUE){
+      par(mar=c(4,3,3,2))
       col_options <- c("black","dark red","dark green","dark blue","orange","purple","red","green","blue","brown","pink","yellow",colors())
       point_options <- c(16,15,17,18,8,9,10,11,12,13,0,1,2,3,4,5,6,14,21,22,23,24,25,19,20)
       plot(Fmult1,xlab="year/season/fleet",ylab="Depletion Adjustment",col=rep(col_options[seq_along(F_cols)],forecast[["Nforecastyrs"]]*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),forecast[["Nforecastyrs"]]),main = paste0(method," loop = ",loop))
@@ -1413,15 +1417,6 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     }
   }
   setwd(oldwd)
-  
-  },
-  error=function(cond) {
-    message("Here's the original error message:")
-    message(cond)
-    browser()
-    # Choose a return value in case of error
-    return(NA)
-  })
   
   return(projection_results)
 }
