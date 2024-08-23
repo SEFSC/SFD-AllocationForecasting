@@ -61,7 +61,8 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
                           Years_projection = 100, #How many years of projection to run (need enough to reach equilibrium) 100 is safe but may not be sufficient for some long lived species.
                           run_in_MSE = FALSE,
                           starting_Forecatch = NULL,
-                          MSY_step = 0.1
+                          MSY_step = 0.1,
+                          SS_exe = NULL
                           ) 
 {
   
@@ -86,7 +87,33 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
   ctl <- SS_readctl(file = start$ctlfile, version = 3.3, use_datlist = TRUE, datlist = dat)
   results <- SS_output(dir = getwd(), covar = FALSE)
   forecast <- SS_readforecast() 
-  parlist <- SS_readpar_3.30(parfile = "ss.par", datsource = dat, ctlsource = ctl)
+  
+  if(!is.null(SS_exe)){
+    
+  }else if(file.exists("ss.exe")){
+    SS_exe <- "ss"
+  } else if(file.exists("ss3.exe")){
+    SS_exe <- "ss3"
+  } else if(file.exists("ss_opt.exe")){
+    SS_exe <- "ss_opt"
+  } else if(file.exists("ss3_opt.exe")){
+    SS_exe <- "ss3_opt"
+  } else if(file.exists("ss3_win.exe")){
+    SS_exe <- "ss3_win"
+  }else{
+    stop("Error: Couldn't find an expected SS executable name")
+  }
+  
+  if(file.exists("ss.par")){
+    par_name <- "ss.par"
+  }else if(file.exists("ss3.par")){
+    par_name <- "ss3.par"
+  }else{
+    stop("Error: No par file found with name ss.par or ss3.par")
+  }
+  
+  parlist <- SS_readpar_3.30(parfile = par_name, datsource = dat, ctlsource = ctl)
+  
   
   if(!is.null(Const_Catch)){
     Const_Catch <- sort(Const_Catch)
@@ -223,16 +250,33 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
   
   #Set all future projections to fish at constant apical F that matches recent years
   #get the years of timeseries F's based on the forecast year range
-  if(forecast[["Fcast_years"]][3]>0){
-    min_fcast_yr <- forecast[["Fcast_years"]][3]
-  }else{
-    min_fcast_yr <- dat[["endyr"]]+forecast[["Fcast_years"]][3]
-  }
-  
-  if(forecast[["Fcast_years"]][4]>0){
-    max_fcast_yr <- forecast[["Fcast_years"]][4]
-  }else{
-    max_fcast_yr <- dat[["endyr"]]+forecast[["Fcast_years"]][4]
+  if(is.data.frame(forecast[["Fcast_years"]])){
+    min_fcast_yr <- forecast[["Fcast_years"]][forecast[["Fcast_years"]][,'MG_type']==11,'st_year']
+    if(min_fcast_yr==-999){
+      min_fcast_yr <- dat[["styr"]]
+    }else if(min_fcast_yr <= 0){
+      min_fcast_yr <- dat[["endyr"]] + min_fcast_yr
+    }
+    
+    max_fcast_yr <- forecast[["Fcast_years"]][forecast[["Fcast_years"]][,'MG_type']==11,'end_year']
+    if(max_fcast_yr <= 0){
+      max_fcast_yr <- dat[["endyr"]] + max_fcast_yr
+    }
+    
+  }else{ 
+    if(forecast[["Fcast_years"]][3]==-999){
+      min_fcast_yr <- dat[["styr"]]
+    }else if(forecast[["Fcast_years"]][3]>0){
+      min_fcast_yr <- forecast[["Fcast_years"]][3]
+    }else{
+      min_fcast_yr <- dat[["endyr"]]+forecast[["Fcast_years"]][3]
+    }
+    
+    if(forecast[["Fcast_years"]][4]>0){
+      max_fcast_yr <- forecast[["Fcast_years"]][4]
+    }else{
+      max_fcast_yr <- dat[["endyr"]]+forecast[["Fcast_years"]][4]
+    }
   }
   TargetYears <- TimeFit2[TimeFit2$Yr>=min_fcast_yr & TimeFit2$Yr<=max_fcast_yr,]
   TargetYears <- TargetYears[,c(2,F_cols2)]
@@ -364,14 +408,14 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
   
   if(!is.null(Const_Catch)){
     forecast$fcast_rec_option <- catch_rec
-    SS_writepar_3.30(parlist = parlist,outfile="ss.par",overwrite = TRUE)
+    SS_writepar_3.30(parlist = parlist,outfile=par_name,overwrite = TRUE)
     SS_writeforecast(mylist=forecast,overwrite = TRUE)
     SS_writestarter(mylist=start,overwrite = TRUE)
     
     if(run_in_MSE==TRUE){
       SSMSE:::run_EM(EM_dir = getwd(), verbose = TRUE, check_converged = TRUE)
     }else{
-      shell(paste("cd /d ",getwd()," && ss -nohess",sep=""))
+      shell(paste("cd /d ",getwd()," && ",SS_exe," -nohess",sep=""))
     }
     #Begin the search in the Benchmark phase
     fitting_Benchmark <- FALSE
@@ -388,14 +432,14 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     #Save all the modified files and then perform a base run of SS so that output is specified correctly with 
     #a forecast[["Nforecastyrs"]] year projection series.
     
-    SS_writepar_3.30(parlist = parlist,outfile="ss.par",overwrite = TRUE)
+    SS_writepar_3.30(parlist = parlist, outfile = par_name, overwrite = TRUE)
     SS_writeforecast(mylist=forecast,overwrite = TRUE)
     SS_writestarter(mylist=start,overwrite = TRUE)
     
     if(run_in_MSE==TRUE){
       SSMSE:::run_EM(EM_dir = getwd(), verbose = TRUE, check_converged = TRUE)
     }else{
-      shell(paste("cd /d ",getwd()," && ss -nohess",sep=""))
+      shell(paste("cd /d ",getwd()," && ",SS_exe," -nohess",sep=""))
     }
     #Begin the search in the Benchmark phase
     fitting_Benchmark <- TRUE
@@ -416,7 +460,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     ctl <- SS_readctl(file = start$ctlfile, version = 3.3, use_datlist = TRUE, datlist = dat)
     results <- SS_output(dir = getwd(), covar = FALSE)
     forecast <- SS_readforecast() 
-    parlist <- SS_readpar_3.30(parfile = "ss.par", datsource = dat, ctlsource = ctl)
+    parlist <- SS_readpar_3.30(parfile = par_name, datsource = dat, ctlsource = ctl)
     
     forecast$fcast_rec_option <- catch_rec
     SS_writeforecast(mylist=forecast,overwrite = TRUE)
@@ -519,11 +563,16 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     Achieved.SSB <- TimeFit3$SpawnBio[1:terminal_year]
     Achieved.Rec <- TimeFit3$Recruit_0[1:terminal_year]
     Achieved.F <- SPRfit$F_report[1:terminal_year]
-    
+    if(is.null(Achieved.F)){
+      Achieved.F <- SPRfit$F_std[1:terminal_year]
+    }
     #If reading in results of a previous OFL run then set the F_OFL and F.ABC values before begining ABC/Rebuild loops
    
     if(Benchmark_complete==TRUE & First_run==TRUE){
       F_report<-SPRfit$F_report
+      if(is.null(F_report)){
+        F_report<-SPRfit$F_std
+      }
       FScale<-median(F_report[(length(F_report)-0.5*Years_projection):length(F_report)])
       F_OFL<-FScale
       if(!is.null(ABC_Fraction)){
@@ -604,8 +653,12 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
       #Calculate the average F at equilibrium that all F's will be scaled to in order
       #to achieve equal F in every year. As depletion approaches the target value this 
       #F will approach F(OFL).
-        
+       
+      
       F_report<-SPRfit$F_report
+      if(is.null(F_report)){
+        F_report<-SPRfit$F_std
+      }
       FScale<-median(F_report[(length(F_report)-0.5*Years_projection):length(F_report)])
       F_OFL<-FScale
       if(!is.null(ABC_Fraction)){
@@ -864,6 +917,9 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
       DepletionScale<-1 #Set depletion scale to 1 so it doesn't trigger continued loops now that Benchmark search is complete
       FScale<-F_OFL #Set the F target to F_OFL for rescaling annual F values in years after the rebuild period.
       F_report<-SPRfit$F_report
+      if(is.null(F_report)){
+        F_report<-SPRfit$F_std
+      }
       F_Rebuild_Scale<-F_report[SPRfit$Yr==Rebuild_yr]
       Depletion<-TimeFit3$SpawnBio/Virgin_bio
       Achieved.Rebuild <- mean(Depletion[SPRfit$Yr==Rebuild_yr])
@@ -913,7 +969,12 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     #Fmult2 calculations define the multiplier for adjusting annual F values
     #Zero catch years are identified first to prevent divide by zero errors in the scaling and
     #to tell the search algorithm that the target has been achieved
-    zero_catch <- which(SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))]==0)
+
+    if(is.null(SPRfit$F_report)){
+      zero_catch <- which(SPRfit$F_std[sort(rep(seq_along(SPRfit$F_std),length(seasons)*length(F_cols)))]==0)
+    }else{
+      zero_catch <- which(SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))]==0)
+    }
     if(fitting_Fixed_Catch==FALSE){
       if(length(zero_catch)>0){
         if(FScale==0){
@@ -921,7 +982,11 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
           Fmult2[-zero_catch] <- 0
         }else{
           Fmult2[zero_catch] <- 2
-          temp_F <- SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))][-zero_catch]
+          if(is.null(SPRfit$F_report)){
+            temp_F <- SPRfit$F_std[sort(rep(seq_along(SPRfit$F_std),length(seasons)*length(F_cols)))][-zero_catch]
+          }else{
+            temp_F <- SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))][-zero_catch]
+          }
           temp_F[temp_F>1.5] <- 1.5
           temp_F[temp_F<(min(0.001,FScale))] <- min(0.001,FScale)
           Fmult2[-zero_catch] <- FScale/temp_F
@@ -929,7 +994,11 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
       }else if(FScale==0){
         Fmult2[] <- 0
       }else{
-        temp_F <- SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))]
+        if(is.null(SPRfit$F_report)){
+          temp_F <- SPRfit$F_std[sort(rep(seq_along(SPRfit$F_std),length(seasons)*length(F_cols)))]
+        }else{
+          temp_F <- SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))]
+        }
         temp_F[temp_F>1.5] <- 1.5
         temp_F[temp_F<(min(0.001,FScale))] <- min(0.001,FScale)
         Fmult2 <- FScale/temp_F
@@ -940,7 +1009,11 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     
     #If in a rebuild search phase the rebuild years are now adjusted independently of the later F_OFL years
     if(fitting_Rebuild==TRUE){
-      temp_F <- SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))][adjusted_Rebuild_F_Rebuild]
+      if(is.null(SPRfit$F_report)){
+        temp_F <- SPRfit$F_std[sort(rep(seq_along(SPRfit$F_std),length(seasons)*length(F_cols)))][adjusted_Rebuild_F_Rebuild]
+      }else{
+        temp_F <- SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))][adjusted_Rebuild_F_Rebuild]
+      }
       zero_rebuild <- which(temp_F==0)
       if(length(zero_rebuild)>0){
         if(Rebuild.Scale==0){
@@ -1148,7 +1221,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     if(run_in_MSE==TRUE){
       SSMSE:::run_EM(EM_dir = getwd(), verbose = TRUE, check_converged = TRUE)
     }else{
-      shell(paste("cd /d ",getwd()," && ss -nohess",sep=""))
+      shell(paste("cd /d ",getwd()," && ",SS_exe," -nohess",sep=""))
     }
     #If all values have converged check if this is the OFL, ABC, or Rebuild loop
     if(keepFitting==FALSE){
@@ -1163,7 +1236,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
           if(run_in_MSE==TRUE){
             SSMSE:::run_EM(EM_dir = getwd(), hess=TRUE, verbose = TRUE, check_converged = TRUE)
           }else{
-            shell(paste("cd /d ",getwd()," && ss",sep=""))
+            shell(paste("cd /d ",getwd()," && ",SS_exe,"",sep=""))
           }
           
           resultsFit <- SS_output(dir=getwd(),covar=FALSE)
@@ -1211,7 +1284,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
           if(run_in_MSE==TRUE){
             SSMSE:::run_EM(EM_dir = getwd(), hess=TRUE, verbose = TRUE, check_converged = TRUE)
           }else{
-            shell(paste("cd /d ",getwd()," && ss",sep=""))
+            shell(paste("cd /d ",getwd()," && ",SS_exe,"",sep=""))
           }
           
           resultsFit <- SS_output(dir=getwd(),covar=FALSE)
@@ -1249,7 +1322,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
           if(run_in_MSE==TRUE){
             SSMSE:::run_EM(EM_dir = getwd(), hess=TRUE, verbose = TRUE, check_converged = TRUE)
           }else{
-            shell(paste("cd /d ",getwd()," && ss ",sep=""))
+            shell(paste("cd /d ",getwd()," && ",SS_exe,"",sep=""))
           }
           
           resultsFit <- SS_output(dir=getwd(),covar=FALSE)
@@ -1302,7 +1375,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
           if(run_in_MSE==TRUE){
             SSMSE:::run_EM(EM_dir = getwd(), hess=TRUE, verbose = TRUE, check_converged = TRUE)
           }else{
-            shell(paste("cd /d ",getwd()," && ss ",sep=""))
+            shell(paste("cd /d ",getwd()," && ",SS_exe,"",sep=""))
           }
           
           resultsFit <- SS_output(dir=getwd(),covar=FALSE)
@@ -1349,7 +1422,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
           if(run_in_MSE==TRUE){
             SSMSE:::run_EM(EM_dir = getwd(), hess=TRUE, verbose = TRUE, check_converged = TRUE)
           }else{
-            shell(paste("cd /d ",getwd()," && ss ",sep=""))
+            shell(paste("cd /d ",getwd()," && ",SS_exe,"",sep=""))
           }
           
           resultsFit <- SS_output(dir=getwd(),covar=FALSE)
@@ -1389,7 +1462,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
           if(run_in_MSE==TRUE){
             SSMSE:::run_EM(EM_dir = getwd(), hess=TRUE, verbose = TRUE, check_converged = TRUE)
           }else{
-            shell(paste("cd /d ",getwd()," && ss ",sep=""))
+            shell(paste("cd /d ",getwd()," && ",SS_exe,"",sep=""))
           }
           
           resultsFit <- SS_output(dir=getwd(),covar=FALSE)
