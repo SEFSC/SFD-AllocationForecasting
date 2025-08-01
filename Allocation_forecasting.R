@@ -10,7 +10,7 @@
 ##---------------------------------------------------------------------##
 #                                                                       #
 #  Author: Nathan Vaughan                                               #
-#  Last update date: 10/15/21                                           #
+#  Last update date: 8/1/25                                           #
 #  Contact: nathan.vaughan@noaa.gov                                     #
 #                                                                       #
 ##---------------------------------------------------------------------##
@@ -43,7 +43,7 @@
 # ABC projections are desired and a rebuild target year if rebuilding projections are desired.
 #
 
-run.projections<-function(assessment_dir, #Here you set the location of a previously fit SS3.3 stock assessment to perform projections
+run.projections<-function(Assessment_dir, #Here you set the location of a previously fit SS3.3 stock assessment to perform projections
                           ABC_Fraction = NULL, #Set the ABC target as a fraction of the OFL target if NULL will not fit ABC projections
                           Rebuild_yr = NULL, #Set the rebuild target year if NULL will not fit rebuild projections
                           Calc_F0 = FALSE, #Should an F=0 projection be performed
@@ -54,56 +54,93 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
                           Allocation.Threshold = 0.0001, # increase them if run is too slow or reduce to improve fit if run is fast.
                           Step.Threshold = 0.0001, #
                           Benchmark_complete = FALSE, #Set to true if you already have a fit Benchmark run but want to add or adjust an ABC or Rebuild run
+                          Benchmark_recruit_setting = 0, #Forecast recruitment setting to use for benchmarks in forecast file
+                          OFL_recruit_setting = NULL, #Forecast recruitment setting to use for OFL in forecast file if NULL uses forecast file
+                          ABC_recruit_setting = NULL, #Forecast recruitment setting to use for OFL in forecast file if NULL uses forecast file
+                          Rebuild_recruit_setting = NULL, #Forecast recruitment setting to use for OFL in forecast file if NULL uses forecast file
+                          F0_recruit_setting = NULL, #Forecast recruitment setting to use for OFL in forecast file if NULL uses forecast file
+                          Const_catch_recruit_setting = NULL, #Forecast recruitment setting to use for OFL in forecast file if NULL uses forecast file
                           Make_plots = FALSE, #Should plots be created (this is useful for diagnostics but can cause annoying errors if plot window is small)
                           Calc_Hessian = FALSE, #Should the hessian inversion be completed for runs once converged. TODO: NOT YET IMPLEMENTED!!!
                           Do_Pstar = FALSE, #If TRUE then ABC_Fraction above will instead be the P* probability of overfishing limit for ABC calculation. TODO: NOT YET IMPLEMENTED!!!
                           Years_report = 20, #How many years of projection to include in stored OFL and ABC reporting. (All forecast years data will still be available in report file) 
                           Years_projection = 100, #How many years of projection to run (need enough to reach equilibrium) 100 is safe but may not be sufficient for some long lived species.
-                          run_in_MSE = FALSE,
-                          starting_Forecatch = NULL,
+                          Constant_fixed_catch = NULL, #Input a data frame with column names ("Fleet","Catch or F","Basis")  
+                          Annual_fixed_catch = NULL, #Input data frame for fixed catches in format of forecatch data frame with columns c("Year","Seas","Fleet","Catch or F","Basis")
+                          Starting_Forecatch = NULL, #Input data frame for initial F values in format of forecatch data frame with columns c("Year","Seas","Fleet","Catch or F","Basis") otherwise will default to recent mean F
+                          Fleet_group = NULL, #Data frame with columns c("Fleet","Group")specifying fleet grouping for allocations (defaults to forecast file settings if NULL)
+                          Group_Allocations = NULL, #Data frame specifying scenarios for allocation of catch between groups (defaults to forecast file settings if NULL)
+                          #If not null input a dataframe with a column for each group and row for each scenario.
+                          Run_in_MSE = FALSE,
                           MSY_step = 0.1,
-                          SS_exe = NULL
+                          SS_exe = NULL,
+                          Verbose = FALSE,
+                          Messages = TRUE
                           ) 
 {
   
   projection_results <- list()
   
-  
-  
   #SSMSE::report_message("Running the allocation forecasting function.") 
   
   #Removed these as inputs as they are not needed yet, could add back to input options later
- 
+  if(Messages == TRUE){
+    message("Starting projections calculations")
+  }
   oldwd<-getwd()
-  
-  library(r4ss)
+  return_warnings <- FALSE
+  combinded_warnings <- NULL
+  # library(r4ss)
+  # if(Run_in_MSE==TRUE){
+  #   library(SSMSE)
+  # }
   #Set large max print to avoid issues with writing out a large forecast file.
   options(max.print = 1000000)
-  setwd(paste0(assessment_dir))
-  assessment_dir <- getwd()
+  setwd(normalizePath(paste0(Assessment_dir)))
+  Assessment_dir <- normalizePath(getwd())
   #Read in all the model files and results 
-  start <- SS_readstarter()
-  dat <- SS_readdat(file = start$datfile, version = 3.3)
-  ctl <- SS_readctl(file = start$ctlfile, version = 3.3, use_datlist = TRUE, datlist = dat)
-  results <- SS_output(dir = getwd(), covar = FALSE)
-  forecast <- SS_readforecast() 
+  start <- r4ss::SS_readstarter(verbose = Verbose)
+  dat <- r4ss::SS_readdat(file = start$datfile, version = 3.3, verbose = Verbose)
+  ctl <- r4ss::SS_readctl(file = start$ctlfile, version = 3.3, use_datlist = TRUE, datlist = dat, verbose = Verbose)
+  results <- r4ss::SS_output(dir = getwd(), covar = FALSE, verbose = Verbose, printstats= Verbose)
+  forecast <- r4ss::SS_readforecast(verbose = Verbose) 
   
-  if(!is.null(SS_exe)){
-    
-  }else if(file.exists("ss.exe")){
-    SS_exe <- "ss"
-  } else if(file.exists("ss3.exe")){
-    SS_exe <- "ss3"
-  } else if(file.exists("ss_opt.exe")){
-    SS_exe <- "ss_opt"
-  } else if(file.exists("ss3_opt.exe")){
-    SS_exe <- "ss3_opt"
-  } else if(file.exists("ss3_win.exe")){
-    SS_exe <- "ss3_win"
-  }else{
-    stop("Error: Couldn't find an expected SS executable name")
+  if(!is.null(forecast$ForeCatch)){
+    if(length(grep("year",colnames(forecast$ForeCatch)))==1){
+    forecast$ForeCatch <- forecast$ForeCatch[forecast$ForeCatch$year<=(dat$endyr+forecast$Nforecastyrs) &
+                                               forecast$ForeCatch$year>(dat$endyr),]
+    }else if(length(grep("Year",colnames(forecast$ForeCatch)))==1){
+      forecast$ForeCatch <- forecast$ForeCatch[forecast$ForeCatch$Year<=(dat$endyr+forecast$Nforecastyrs) &
+                                                 forecast$ForeCatch$Year>(dat$endyr),]
+    }else{
+      stop("Error: for some reason the forecast ForeCatch dataframe doesn't 
+            have any column named 'year' or 'Year' contact developer to update
+            for an apparent change in SS/r4ss formating")
+    }
   }
   
+  os <- .Platform[["OS.type"]]
+  if(Run_in_MSE == TRUE){
+    bin <- SSMSE:::get_bin("ss")
+  }else{
+    if(!is.null(SS_exe)){
+      
+    }else if(file.exists("ss")){
+      SS_exe <- "ss"
+    }else if(file.exists("ss.exe")){
+      SS_exe <- "ss"
+    } else if(file.exists("ss3.exe")){
+      SS_exe <- "ss3"
+    } else if(file.exists("SS_opt.exe")){
+      SS_exe <- "SS_opt"
+    } else if(file.exists("ss3_opt.exe")){
+      SS_exe <- "ss3_opt"
+    } else if(file.exists("ss3_win.exe")){
+      SS_exe <- "ss3_win"
+    }else{
+      stop("Error: Couldn't find an expected SS executable name")
+    }
+  }
   if(file.exists("ss.par")){
     par_name <- "ss.par"
   }else if(file.exists("ss3.par")){
@@ -111,9 +148,8 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
   }else{
     stop("Error: No par file found with name ss.par or ss3.par")
   }
-  
-  parlist <- SS_readpar_3.30(parfile = par_name, datsource = dat, ctlsource = ctl)
-  
+  admb_options <- "-nohess"
+  parlist <- r4ss::SS_readpar_3.30(parfile = par_name, datsource = dat, ctlsource = ctl)
   
   if(!is.null(Const_Catch)){
     Const_Catch <- sort(Const_Catch)
@@ -121,25 +157,24 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
   
   #First set up a working director for running projections in (to avoid overwriting the base files with a failed model run)
   #then copy all of the assessment files to this working folder (ignore any output directories that have been previously created)
-  if(Benchmark_complete == FALSE){
   if(dir.exists(file.path(getwd(),"Working_dir"))){
     unlink(file.path(getwd(),"Working_dir"), recursive = TRUE)
   }
   dir.create(file.path(getwd(),"Working_dir"))
-  temp.files <- list.files(path=assessment_dir)
+  
+  if(Benchmark_complete == FALSE){
+  temp.files <- list.files(path=Assessment_dir)
   folders <- c(which(temp.files=="Benchmark_target"), which(temp.files=="OFL_target"), which(temp.files=="ABC_target"), which(temp.files=="Rebuild_target"), which(temp.files=="F0_target"), which(temp.files=="Working_dir"))
   if(length(folders)>0){
     temp.files <- temp.files[-folders]
   }
   file.copy(from = file.path(getwd(),temp.files), to = file.path(getwd(),"Working_dir",temp.files))
   }else{
-    temp.files <- list.files(path=file.path(getwd(),"Working_dir"))
-    folders <- c(which(temp.files=="Benchmark_target"), which(temp.files=="OFL_target"), which(temp.files=="ABC_target"), which(temp.files=="Rebuild_target"), which(temp.files=="F0_target"), which(temp.files=="Working_dir"))
+    temp.files <- list.files(path=file.path(getwd(),"Benchmark_target"))
+    folders <- which(grep("Allocation_run_",temp.files,fixed=TRUE))
     if(length(folders)>0){
       temp.files <- temp.files[-folders]
     }
-    unlink(file.path(getwd(),"Working_dir/",temp.files))
-    temp.files <- list.files(path=file.path(getwd(),"Benchmark_target"))
     file.copy(from = file.path(getwd(),"Benchmark_target",temp.files), to = file.path(getwd(),"Working_dir",temp.files))
   }
   
@@ -152,9 +187,28 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
   
   #If fitting the Benchmark/OFL values then save the specified recruitment source for catches 
   #and set to 0 (S/R curve) in order to first calculate benchmarks
-  catch_rec <- forecast$fcast_rec_option
+  input_recruit_setting <- forecast$fcast_rec_option
+  if(is.null(Benchmark_recruit_setting)){
+    Benchmark_recruit_setting <- input_recruit_setting
+  }
+  if(is.null(OFL_recruit_setting)){
+    OFL_recruit_setting <- input_recruit_setting
+  }
+  if(is.null(ABC_recruit_setting)){
+    ABC_recruit_setting <- input_recruit_setting
+  }
+  if(is.null(Rebuild_recruit_setting)){
+    Rebuild_recruit_setting <- input_recruit_setting
+  }
+  if(is.null(F0_recruit_setting)){
+    F0_recruit_setting <- input_recruit_setting
+  }
+  if(is.null(Const_catch_recruit_setting)){
+    Const_catch_recruit_setting <- input_recruit_setting
+  }
+  
   if(Benchmark_complete==FALSE){
-    forecast$fcast_rec_option <- 0
+    forecast$fcast_rec_option <- Benchmark_recruit_setting
   }
   
   #Need to set recdevs and implementation error for all projection years 
@@ -247,7 +301,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     achieved.report <- rbind(achieved.report,temp.data)
   }
   achieved.report<-achieved.report[order(achieved.report$Year,achieved.report$Seas,achieved.report$Fleet),]
-  
+ 
   #Set all future projections to fish at constant apical F that matches recent years
   #get the years of timeseries F's based on the forecast year range
   if(is.data.frame(forecast[["Fcast_years"]])){
@@ -292,65 +346,85 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     stop("forecast should be set to either 1, 2, or 3 so we know what the target is")
   }
   
-  if(is.null(starting_Forecatch)){
-    #Build a projection forcast matrix of F values by fleet/season/year which will adjusted to achieve target stock status, F, and allocations.
-    forecast_F<-matrix(1,nrow=forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols),ncol=5)
-    forecast_F[,1]<-sort(rep((dat[["endyr"]]+1):(dat[["endyr"]]+forecast[["Nforecastyrs"]]),length(seasons)*length(F_cols)))
-    forecast_F[,2]<-rep(sort(rep(seasons,length(F_cols))),forecast[["Nforecastyrs"]])
-    forecast_F[,3]<-rep(sort(which(dat$fleetinfo$type!=3)),forecast[["Nforecastyrs"]]*(length(seasons)))
-    for(i in seasons){
-      forecast_F[forecast_F[,2]==i,4]<-unlist(rep(F_by_Fleet_seas[F_by_Fleet_seas[,1]==i,-1],forecast[["Nforecastyrs"]]))
-      forecast_F[forecast_F[,2]==i,5]<-rep(99,length(F_cols)*forecast[["Nforecastyrs"]])
-    }
-    forecast_F<-as.data.frame(forecast_F)
-    colnames(forecast_F)<-c("Year","Seas","Fleet","Catch or F","Basis")
-    forecast_F[,"Catch or F"] <- forecast_F[,"Catch or F"] + 0.00000001
-  }else{
-    if(dim(starting_Forecatch)[1]!=forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols)){
-      stop("Error: You input a starting forecatch matrix but it is not the correct length n_years*n_fleets*n_seasons.")
-    }
-    if(dim(starting_Forecatch)[2]!=5){
-      stop("Error: You input a starting forecatch matrix but it does not have 5 columns Year, Season, Fleet, Catch, Basis.")
-    }
-    if(length(dim(starting_Forecatch))!=2){
-      stop("Error: You input a starting forecatch but it is not a matrix")
-    }
-    forecast_F <- starting_Forecatch
-    colnames(forecast_F)<-c("Year","Seas","Fleet","Catch or F","Basis")
+  #Set up the forecast Forecatch dataframe to specify fixed fishing mortality rates
+  #for each fleet for the entire 100 year projection period.
+  #data frame will be build sequentially 
+  #1) Set all F's to recent mean from the model
+  Forecast_catch_setup<-matrix(1,nrow=forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols),ncol=7)
+  Forecast_catch_setup[,1]<-sort(rep((dat[["endyr"]]+1):(dat[["endyr"]]+forecast[["Nforecastyrs"]]),length(seasons)*length(F_cols)))
+  Forecast_catch_setup[,2]<-rep(sort(rep(seasons,length(F_cols))),forecast[["Nforecastyrs"]])
+  Forecast_catch_setup[,3]<-rep(sort(which(dat$fleetinfo$type!=3)),forecast[["Nforecastyrs"]]*(length(seasons)))
+  for(i in seasons){
+    Forecast_catch_setup[Forecast_catch_setup[,2]==i,4]<-unlist(rep(F_by_Fleet_seas[F_by_Fleet_seas[,1]==i,-1],forecast[["Nforecastyrs"]]))
   }
-  
-  adjusted_F_OFL<-1:(forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols))
+  Forecast_catch_setup[,5] <- 99
+  Forecast_catch_setup[,6] <- 0
+  Forecast_catch_setup[,6] <- 0
+  Forecast_catch_setup<-as.data.frame(Forecast_catch_setup)
+  colnames(Forecast_catch_setup)<-c("Year","Seas","Fleet","Catch or F","Basis","Fixed","Rebuild")
+  #2) Set any fleets with 0 F to a small number so they can be increased if needed
+  Forecast_catch_setup[,"Catch or F"] <- ifelse(Forecast_catch_setup[,"Catch or F"]==0, 0.00000001,Forecast_catch_setup[,"Catch or F"])
 
-  #Extract fixed forecast values from the forecast file these will be fixed at these values for the projections
-  #This is used to implement recent catches or fixed harvest from an independent fleet such as shrimp bycatch.
-  if(!is.null(forecast[["ForeCatch"]])){
-    Fixed_catch_basis <- forecast[["InputBasis"]]
-    Fixed_catch_target <- forecast[["ForeCatch"]]
-    fixed_ref <- seq_along(Fixed_catch_target[,1])
-    if(length(names(Fixed_catch_target))==4){
-      new_names <- c(names(Fixed_catch_target),"Basis")
-      Fixed_catch_target <- cbind(Fixed_catch_target,rep(Fixed_catch_basis,length(Fixed_catch_target[,1])))
-      names(Fixed_catch_target) <- new_names
+  #3) Incorporate fixed values from the existing forecast file
+  if(!is.null(forecast$ForeCatch)){
+    for(i in seq_along(forecast$ForeCatch[,1])){
+      match_row <- which(Forecast_catch_setup[,c("Year")]==forecast$ForeCatch[i,c("Year")] &
+                         Forecast_catch_setup[,c("Seas")]==forecast$ForeCatch[i,c("Seas")] &
+                         Forecast_catch_setup[,c("Fleet")]==forecast$ForeCatch[i,c("Fleet")])
+      Forecast_catch_setup[match_row,"Catch or F"] <- forecast$ForeCatch[i,"Catch or F"]
+      Forecast_catch_setup[match_row,"Fixed"] <- 1
+      if(length(forecast$ForeCatch[i,])==5){
+        Forecast_catch_setup[match_row,"Basis"] <- forecast$ForeCatch[i,"Basis"]
+      }else if(length(forecast$ForeCatch[i,])==4){
+        Forecast_catch_setup[match_row,"Basis"] <- forecast$InputBasis
+      }else{
+        stop("You have a Forecatch dataframe in your forecast file but it doesn't have 4 or 5 columns something is wrong")
+      }
     }
-    for(i in seq_along(Fixed_catch_target[,1])){
-      fixed_ref[i]<-which(forecast_F[,1]==Fixed_catch_target[i,1] & 
-                          forecast_F[,2]==Fixed_catch_target[i,2] & 
-                          forecast_F[,3]==Fixed_catch_target[i,3])
+    if(!is.null(Constant_fixed_catch)){
+      return_warnings <- TRUE
+      combinded_warnings <- paste(combinded_warnings,
+                                  "You have input fixed constant catches but also have fixed values in the model forecast file. Check results to make sure all values are what you intended",
+                                  sep="\n")
     }
-    
-    #Replace the temporary average F values with specified fixed inputs
-    forecast_F[fixed_ref,c(4,5)]<-Fixed_catch_target[,c(4,5)]
-    adjusted_F_OFL<-adjusted_F_OFL[-fixed_ref]
-    if(length(adjusted_F_OFL)==0){stop("all F's are fixed nothing to estimate")}
-  }else{
-    fixed_ref<-NULL
+    if(!is.null(Annual_fixed_catch)){
+      return_warnings <- TRUE
+      combinded_warnings <- paste(combinded_warnings,
+                                  "You have input fixed annual catches but also have fixed values in the model forecast file. Check results to make sure all values are what you intended",
+                                  sep="\n")
+    }
   }
-  
-
+  #4) Fix constant F/Catch for fleets such as red tide, bycatch, or closed fleets  
+  if(!is.null(Constant_fixed_catch)){
+    for(i in seq_along(Constant_fixed_catch[,1])){
+      Forecast_catch_setup[Forecast_catch_setup[,"Fleet"]==Constant_fixed_catch[i,"Fleet"],"Catch or F"] <- Constant_fixed_catch[i,"Catch or F"]
+      Forecast_catch_setup[Forecast_catch_setup[,"Fleet"]==Constant_fixed_catch[i,"Fleet"],"Basis"] <- Constant_fixed_catch[i,"Basis"]
+      Forecast_catch_setup[Forecast_catch_setup[,"Fleet"]==Constant_fixed_catch[i,"Fleet"],"Fixed"] <- 1
+    }
+  }
+  #5) Update annual fixed F for fleets usually used for interim period catches
+  if(!is.null(Annual_fixed_catch)){
+    for(i in seq_along(Annual_fixed_catch[,1])){
+      match_row <- which(Forecast_catch_setup[,c("Year")]==forecast$ForeCatch[i,c("Year")] &
+                           Forecast_catch_setup[,c("Seas")]==forecast$ForeCatch[i,c("Seas")] &
+                           Forecast_catch_setup[,c("Fleet")]==forecast$ForeCatch[i,c("Fleet")])
+      Forecast_catch_setup[match_row,"Catch or F"] <- Annual_fixed_catch[i,"Catch or F"]
+      Forecast_catch_setup[match_row,"Basis"] <- Annual_fixed_catch[i,"Basis"]
+      Forecast_catch_setup[match_row,"Fixed"] <- 1
+    }
+  }
+  #6) Create reference trackers for which years have fixed catch and which are adjusted
+  fixed_ref <- which(Forecast_catch_setup[,"Fixed"]==1)
+  adjusted_F_OFL<-which(Forecast_catch_setup[,"Fixed"]==0)
+  Fixed_catch_target<-Forecast_catch_setup[fixed_ref,1:5]
+  #7) Create forecast_F dataframe that will be used to update ForeCatch in forecast file
+  forecast_F <- Forecast_catch_setup[,1:5]
+  #6) Identify which years are subject to rebuilding plan F limits
   if(!is.null(Rebuild_yr)){
-    #This reference identifies inputs subject to a rebuilding period F 
-    rebuild_ref <- which(forecast_F[,1]<=Rebuild_yr)
+    #This reference identifies inputs subject to a rebuilding period F if any
+    rebuild_ref <- which(Forecast_catch_setup[,1]<=Rebuild_yr)
     if(length(rebuild_ref)>0){
+      Forecast_catch_setup[rebuild_ref,"Rebuild"]<-1
       adjusted_OFL_F_Rebuild<-adjusted_F_OFL[adjusted_F_OFL>max(rebuild_ref)]
       adjusted_Rebuild_F_Rebuild<-rebuild_ref
       if(!is.null(fixed_ref)){
@@ -362,33 +436,70 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     adjusted_Rebuild_F_Rebuild <- NULL
     rebuild_ref <- NULL
   }
+  
   #Here all input values are assigned to an allocation group if needed and
   #relative landings targets are identified
-  n_groups <- forecast[["N_allocation_groups"]]
+  if(is.null(Fleet_group)){
+    n_groups <- forecast[["N_allocation_groups"]]
+  }else{
+    n_groups <- length(unique(Fleet_group[Fleet_group[,"Group"]!=0,"Group"]))
+  }
   groups <- rep(0,length(F_cols))
   fleets_by_group <- list()
-  Allocations <- forecast_F[,c(1,2,3,4,5,5)]
-  Allocations[,c(4)] <- 0
-  Allocations[,c(5,6)] <- 1
-  names(Allocations) <- c("Year","Seas","Fleet","Group","Target","Achieved")
-  if(n_groups>0){
-    for(i in seq_along(forecast[["fleet_assignment_to_allocation_group"]][,"Fleet"])){
-      groups[forecast[["fleet_assignment_to_allocation_group"]][i,"Fleet"]] <- forecast[["fleet_assignment_to_allocation_group"]][i,"Group"]
-      Allocations[Allocations[,"Fleet"]==forecast[["fleet_assignment_to_allocation_group"]][i,"Fleet"],4] <- forecast[["fleet_assignment_to_allocation_group"]][i,"Group"]
+  #Setup multiple allocation scenarios matrix to run allocation grid
+  if(!is.null(Group_Allocations)){
+    if(length(Group_Allocations[1,])!=n_groups){
+      stop("Error: You have a different number of allocations specifed than the number of groups")
     }
-    
-    alloc <- forecast[["allocation_among_groups"]][order(forecast[["allocation_among_groups"]][,"Year"]),]
-    for(i in seq_along(alloc[,1])){
-      for(j in seq_along(alloc[i,-1])){
-        Allocations[Allocations[,1]>=alloc[,"Year"] & Allocations[,4]==j,5] <- alloc[i,(j+1)]/sum(alloc[i,-1])
-      }
+    N_allocation_scenarios <- length(Group_Allocations[,1])
+    Allocation_targets <- Group_Allocations
+    for(i in seq_along(Allocation_targets[,1])){
+      Allocation_targets[i,] <- Allocation_targets[i,]/sum(Allocation_targets[i,])
     }
-    
-    for(i in 1:n_groups){
-      fleets_by_group[[i]]<-which(is.element(which(dat$fleetinfo$type!=3),which(groups==i)))
-    }
+    Allocation_targets <- rbind(unique(Fleet_group[Fleet_group[,"Group"]!=0,"Group"]),Group_Allocations)
+  }else{
+    N_allocation_scenarios <- 1
   }
   
+  Allocation_tracker <- list()
+  #Loop over all allocation scenarios
+  for(i in 1:N_allocation_scenarios){
+    projection_results[[paste0("Allocation_run_",i)]] <- list()
+    Allocations <- forecast_F[,c(1,2,3,4,5,5)]
+    Allocations[,c(4)] <- 0
+    Allocations[,c(5,6)] <- 1
+    names(Allocations) <- c("Year","Seas","Fleet","Group","Target","Achieved")
+    
+    if(n_groups>0){
+      if(is.null(Fleet_group)){
+        for(j in seq_along(forecast[["fleet_assignment_to_allocation_group"]][,"Fleet"])){
+          groups[forecast[["fleet_assignment_to_allocation_group"]][j,"Fleet"]] <- forecast[["fleet_assignment_to_allocation_group"]][j,"Group"]
+          Allocations[Allocations[,"Fleet"]==forecast[["fleet_assignment_to_allocation_group"]][j,"Fleet"],4] <- forecast[["fleet_assignment_to_allocation_group"]][j,"Group"]
+        }
+        alloc <- forecast[["allocation_among_groups"]][order(forecast[["allocation_among_groups"]][,"Year"]),]
+        for(j in seq_along(alloc[,1])){
+          for(k in seq_along(alloc[j,-1])){
+            Allocations[Allocations[,1]>=alloc[,"Year"] & Allocations[,4]==k,5] <- alloc[j,(k+1)]/sum(alloc[j,-1])
+          }
+        }
+      }else{
+        for(j in seq_along(Fleet_group[,"Fleet"])){
+          groups[Fleet_group[j,"Fleet"]] <- Fleet_group[j,"Group"]
+          Allocations[Allocations[,"Fleet"]==Fleet_group[j,"Fleet"],4] <- Fleet_group[j,"Group"]
+        }
+        for(j in seq_along(Allocation_targets[1,])){
+          Allocations[Allocations[,"Group"]==Allocation_targets[1,j],5] <- Allocation_targets[i+1,j]
+        }
+      }
+      for(j in 1:n_groups){
+        fleets_by_group[[j]]<-which(is.element(which(dat$fleetinfo$type!=3),which(groups==j)))
+      }
+    }
+    Allocation_tracker[[i]] <- Allocations
+  }
+  Allocations <- Allocation_tracker[[1]]
+  allocation_loop <- 1
+ 
   forecast[["Forecast"]] <- 4
   forecast[["InputBasis"]] <- -1
   forecast[["ForeCatch"]] <- forecast_F
@@ -407,16 +518,31 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
   First_run<-TRUE
   
   if(!is.null(Const_Catch)){
-    forecast$fcast_rec_option <- catch_rec
-    SS_writepar_3.30(parlist = parlist,outfile=par_name,overwrite = TRUE)
-    SS_writeforecast(mylist=forecast,overwrite = TRUE)
-    SS_writestarter(mylist=start,overwrite = TRUE)
+    forecast$fcast_rec_option <- Const_catch_recruit_setting
+    r4ss::SS_writepar_3.30(parlist = parlist,outfile=par_name,overwrite = TRUE, verbose = Verbose)
+    r4ss::SS_writeforecast(mylist=forecast,overwrite = TRUE, verbose = Verbose)
+    r4ss::SS_writestarter(mylist=start,overwrite = TRUE, verbose = Verbose)
     
-    if(run_in_MSE==TRUE){
-      SSMSE:::run_EM(EM_dir = getwd(), verbose = TRUE, check_converged = TRUE)
-    }else{
-      shell(paste("cd /d ",getwd()," && ",SS_exe," -nohess",sep=""))
+    dir <- normalizePath(getwd())
+    if(Run_in_MSE==FALSE){
+      bin <- file.path(dir,SS_exe)
     }
+    if (os == "unix") {
+      system(
+        paste0(
+          "cd ", dir, ";", paste0(bin, " "),
+          admb_options
+        ),
+        ignore.stdout = TRUE
+      )
+    } else {
+      system(paste0(paste0(bin, " "), admb_options),
+             invisible = TRUE, ignore.stdout = TRUE,
+             show.output.on.console = FALSE
+      )
+    }
+    Sys.sleep(0.05)
+    
     #Begin the search in the Benchmark phase
     fitting_Benchmark <- FALSE
     fitting_OFL <- FALSE
@@ -432,15 +558,31 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     #Save all the modified files and then perform a base run of SS so that output is specified correctly with 
     #a forecast[["Nforecastyrs"]] year projection series.
     
-    SS_writepar_3.30(parlist = parlist, outfile = par_name, overwrite = TRUE)
-    SS_writeforecast(mylist=forecast,overwrite = TRUE)
-    SS_writestarter(mylist=start,overwrite = TRUE)
+    r4ss::SS_writepar_3.30(parlist = parlist, outfile = par_name, overwrite = TRUE, verbose = Verbose)
+    r4ss::SS_writeforecast(mylist=forecast,overwrite = TRUE, verbose = Verbose)
+    r4ss::SS_writestarter(mylist=start,overwrite = TRUE, verbose = Verbose)
     
-    if(run_in_MSE==TRUE){
-      SSMSE:::run_EM(EM_dir = getwd(), verbose = TRUE, check_converged = TRUE)
-    }else{
-      shell(paste("cd /d ",getwd()," && ",SS_exe," -nohess",sep=""))
+    dir <- normalizePath(getwd())
+    if(Run_in_MSE==FALSE){
+      bin <- file.path(dir,SS_exe)
     }
+    if (os == "unix") {
+      system(
+        paste0(
+          "cd ", dir, ";", paste0(bin, " "),
+          admb_options
+        ),
+        ignore.stdout = TRUE
+      )
+    } else {
+      system(paste0(paste0(bin, " "), admb_options),
+             invisible = TRUE, ignore.stdout = TRUE,
+             show.output.on.console = FALSE
+      )
+    }
+    Sys.sleep(0.05)
+    
+    
     #Begin the search in the Benchmark phase
     fitting_Benchmark <- TRUE
     fitting_OFL <- FALSE
@@ -455,15 +597,15 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
   }else{
     #Save all the modified files and then set search to begin in OFL phase 
     
-    start <- SS_readstarter()
-    dat <- SS_readdat(file = start$datfile, version = 3.3)
-    ctl <- SS_readctl(file = start$ctlfile, version = 3.3, use_datlist = TRUE, datlist = dat)
-    results <- SS_output(dir = getwd(), covar = FALSE)
-    forecast <- SS_readforecast() 
-    parlist <- SS_readpar_3.30(parfile = par_name, datsource = dat, ctlsource = ctl)
+    start <- r4ss::SS_readstarter(verbose = Verbose)
+    dat <- r4ss::SS_readdat(file = start$datfile, version = 3.3, verbose = Verbose)
+    ctl <- r4ss::SS_readctl(file = start$ctlfile, version = 3.3, use_datlist = TRUE, datlist = dat, verbose = Verbose)
+    results <- r4ss::SS_output(dir = getwd(), covar = FALSE, verbose = Verbose, printstats= Verbose)
+    forecast <- r4ss::SS_readforecast(verbose = Verbose) 
+    parlist <- r4ss::SS_readpar_3.30(parfile = par_name, datsource = dat, ctlsource = ctl, verbose = Verbose)
     
-    forecast$fcast_rec_option <- catch_rec
-    SS_writeforecast(mylist=forecast,overwrite = TRUE)
+    forecast$fcast_rec_option <- OFL_recruit_setting
+    r4ss::SS_writeforecast(mylist=forecast,overwrite = TRUE, verbose = Verbose)
     
     fitting_Benchmark <- FALSE
     fitting_OFL <- TRUE
@@ -484,12 +626,20 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
       par(mfrow=c(4,2))
     }
   }
+  
+  if(Messages == TRUE){
+    if(Benchmark_complete==FALSE){
+      message("Projections targets have been set up begining optimization of Fs for Benchmarks")
+    }else{
+      message("Projections targets have been set up begining optimization of Fs for OFL")
+    }
+  }
   #Now start a loop of projecting and modifying fixed F's until the desired 
   #landings projections are achieved
   while(keepFitting){
     #Read in the SS results for landings and stock status to determine if desired
     #targets have been achieved
-    resultsFit <- SS_output(dir=getwd(),covar=FALSE)
+    resultsFit <- r4ss::SS_output(dir=getwd(),covar=FALSE, verbose = Verbose, printstats= Verbose)
     TimeFit <- resultsFit[["timeseries"]]
     TimeFit <- TimeFit[TimeFit[,"Yr"]>dat[["endyr"]],]
     SPRfit <- resultsFit[["sprseries"]]
@@ -499,6 +649,18 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
       par(mar=c(4,3,3,2))
       plot(SPRfit[SPRfit[,"Yr"]>=dat[["endyr"]],"F_report"],xlab="year",ylab="F",main = paste0(method," loop = ",loop))
       plot(SPRfit[SPRfit[,"Yr"]>=dat[["endyr"]],"Deplete"],xlab="year",ylab="Depletion",main = paste0(method," loop = ",loop))
+    }
+    
+    if(is.element(loop,c(1,2,3,4,5,10,20,30,40,50,100,200,300,400,500,1000))){
+      if(Messages == TRUE){
+        message(paste0("Running optimization loop ",loop))
+        if(loop>50){
+          message("Optimization seems to be taking a while I would suggest checking the working directory report and/or forcast files to ensure this is converging")
+        }
+        if(loop==1000){
+          message("Something is probably wrong are you really sure this is converging?")
+        }
+      }
     }
     
     #Identify the column numbers for Catch, F, SSB, Recruits, etc
@@ -588,13 +750,13 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
       Achieved.Catch.equil <- sum(TimeFit3[(length(TimeFit3[,1])-9):length(TimeFit3[,1]),Catch_cols3])/10
       
       if(n_groups>1){
-        projection_results[["Group_Catch_Benchmark"]]<-list()
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_Benchmark"]]<-list()
         for(i in 1:n_groups){
           Achieved.Catch.group.equil <- sum(TimeFit3[(length(TimeFit3[,1])-9):length(TimeFit3[,1]),Catch_cols3[fleets_by_group[[i]]]])/10
-          projection_results[["Group_Catch_Equil_Benchmark"]][[i]]<-Achieved.Catch.group.equil
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_Equil_Benchmark"]][[i]]<-Achieved.Catch.group.equil
           
           Achieved.Catch.group <- apply(TimeFit3[1:terminal_year,Catch_cols3[fleets_by_group[[i]]],drop=FALSE],1,sum)
-          projection_results[["Group_Catch_Benchmark"]][[i]]<-Achieved.Catch.group
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_Benchmark"]][[i]]<-Achieved.Catch.group
         }
       }
       
@@ -603,21 +765,21 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
       Achieved.SSB.equil <- median(TimeFit3$SpawnBio[(length(TimeFit3$SpawnBio)-9):length(TimeFit3$SpawnBio)])
       Achieved.Rec.equil <- median(TimeFit3$Recruit_0[(length(TimeFit3$Recruit_0)-9):length(TimeFit3$Recruit_0)])
       
-      projection_results[["Catch_equil_Benchmark"]] <- Achieved.Catch.equil
-      projection_results[["F_equil_Benchmark"]] <- F_OFL
-      projection_results[["Depletion_equil_Benchmark"]] <- Achieved.SSBratio.equil
-      projection_results[["SSB_equil_Benchmark"]] <- Achieved.SSB.equil
-      projection_results[["SPR_equil_Benchmark"]] <- Achieved.SPR.equil
-      projection_results[["Recruitment_equil_Benchmark"]] <- Achieved.Rec.equil
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Catch_equil_Benchmark"]] <- Achieved.Catch.equil
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["F_equil_Benchmark"]] <- F_OFL
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Depletion_equil_Benchmark"]] <- Achieved.SSBratio.equil
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["SSB_equil_Benchmark"]] <- Achieved.SSB.equil
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["SPR_equil_Benchmark"]] <- Achieved.SPR.equil
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Recruitment_equil_Benchmark"]] <- Achieved.Rec.equil
       
-      projection_results[["Forecatch_Benchmark"]] <- achieved.report
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Forecatch_Benchmark"]] <- achieved.report
       
-      projection_results[["Catch_Benchmark"]] <- Achieved.Catch
-      projection_results[["F_Benchmark"]] <- Achieved.F
-      projection_results[["Depletion_Benchmark"]] <- Achieved.SSBratio
-      projection_results[["SSB_Benchmark"]] <- Achieved.SSB
-      projection_results[["SPR_Benchmark"]] <- Achieved.SPR
-      projection_results[["Recruitment_Benchmark"]] <- Achieved.Rec
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Catch_Benchmark"]] <- Achieved.Catch
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["F_Benchmark"]] <- Achieved.F
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Depletion_Benchmark"]] <- Achieved.SSBratio
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["SSB_Benchmark"]] <- Achieved.SSB
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["SPR_Benchmark"]] <- Achieved.SPR
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Recruitment_Benchmark"]] <- Achieved.Rec
     }
     
     if(is.na(max(abs(achieved.report[,'F']-forecast_F[,"Catch or F"])[adjusted_F_OFL]))){
@@ -676,32 +838,32 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
       
       
       if(n_groups>1){
-        projection_results[["Group_Catch_Benchmark"]]<-list()
-        projection_results[["Group_Catch_Equil_Benchmark"]]<-list()
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_Benchmark"]]<-list()
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_Equil_Benchmark"]]<-list()
         for(i in 1:n_groups){
           Achieved.Catch.group.equil <- sum(TimeFit3[(length(TimeFit3[,1])-9):length(TimeFit3[,1]),Catch_cols3[fleets_by_group[[i]]]])/10
-          projection_results[["Group_Catch_Equil_Benchmark"]][[i]]<-Achieved.Catch.group.equil
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_Equil_Benchmark"]][[i]]<-Achieved.Catch.group.equil
           
           Achieved.Catch.group <- apply(TimeFit3[1:terminal_year,Catch_cols3[fleets_by_group[[i]]],drop=FALSE],1,sum)
-          projection_results[["Group_Catch_Benchmark"]][[i]]<-Achieved.Catch.group
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_Benchmark"]][[i]]<-Achieved.Catch.group
         }
       }
       
-      projection_results[["Catch_equil_Benchmark"]] <- Achieved.Catch.equil
-      projection_results[["F_equil_Benchmark"]] <- F_OFL
-      projection_results[["Depletion_equil_Benchmark"]] <- Achieved.SSBratio.equil
-      projection_results[["SSB_equil_Benchmark"]] <- Achieved.SSB.equil
-      projection_results[["SPR_equil_Benchmark"]] <- Achieved.SPR.equil
-      projection_results[["Recruitment_equil_Benchmark"]] <- Achieved.Rec.equil
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Catch_equil_Benchmark"]] <- Achieved.Catch.equil
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["F_equil_Benchmark"]] <- F_OFL
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Depletion_equil_Benchmark"]] <- Achieved.SSBratio.equil
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["SSB_equil_Benchmark"]] <- Achieved.SSB.equil
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["SPR_equil_Benchmark"]] <- Achieved.SPR.equil
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Recruitment_equil_Benchmark"]] <- Achieved.Rec.equil
       
-      projection_results[["Forecatch_Benchmark"]] <- achieved.report
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Forecatch_Benchmark"]] <- achieved.report
       
-      projection_results[["Catch_Benchmark"]] <- Achieved.Catch
-      projection_results[["F_Benchmark"]] <- Achieved.F
-      projection_results[["Depletion_Benchmark"]] <- Achieved.SSBratio
-      projection_results[["SSB_Benchmark"]] <- Achieved.SSB
-      projection_results[["SPR_Benchmark"]] <- Achieved.SPR
-      projection_results[["Recruitment_Benchmark"]] <- Achieved.Rec
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Catch_Benchmark"]] <- Achieved.Catch
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["F_Benchmark"]] <- Achieved.F
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Depletion_Benchmark"]] <- Achieved.SSBratio
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["SSB_Benchmark"]] <- Achieved.SSB
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["SPR_Benchmark"]] <- Achieved.SPR
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Recruitment_Benchmark"]] <- Achieved.Rec
       #Calculate depletion target adjustment scale depending on the specified target (SPR ratio, SSB ratio, or true MSY)   
       if(Forecast_target==1){
         search_step<-0.00001
@@ -767,7 +929,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
           MSY.Fit[1,] <- c(Achieved.Catch,FScale,Achieved.Depletion,Target.Depletion)
           if(loop>1){
             if(Achieved.Catch<Last_Achieved_Catch){
-              search_step <- -0.5*search_step
+              search_step <- -0.3*search_step
             }
           
             Target.Depletion <- Target.Depletion+search_step
@@ -776,7 +938,7 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
             if(length(min_diff)>0){
               Old.Catch <- MSY.Fit[min_diff[1],1]
               if(Old.Catch<Achieved.Catch){
-                search_step <- -0.5*search_step
+                search_step <- -0.3*search_step
               }
               Target.Depletion <- Target.Depletion+search_step
               Achieved.Catch <- Old.Catch
@@ -857,20 +1019,20 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
       FScale<-F_OFL #Set the F target to F.OFL for rescaling annual F values
       
       if(n_groups>1){
-        projection_results[["Group_Catch_OFL"]]<-list()
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_OFL"]]<-list()
         for(i in 1:n_groups){
           Achieved.Catch.group <- apply(TimeFit3[1:terminal_year,Catch_cols3[fleets_by_group[[i]]],drop=FALSE],1,sum)
-          projection_results[["Group_Catch_OFL"]][[i]]<-Achieved.Catch.group
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_OFL"]][[i]]<-Achieved.Catch.group
         }
       }
       
-      projection_results[["Catch_OFL"]] <- Achieved.Catch
-      projection_results[["F_OFL"]] <- Achieved.F
-      projection_results[["Depletion_OFL"]] <- Achieved.SSBratio
-      projection_results[["SSB_OFL"]] <- Achieved.SSB
-      projection_results[["SPR_OFL"]] <- Achieved.SPR
-      projection_results[["Recruitment_OFL"]] <- Achieved.Rec
-      projection_results[["Forecatch_OFL"]] <- achieved.report
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Catch_OFL"]] <- Achieved.Catch
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["F_OFL"]] <- Achieved.F
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Depletion_OFL"]] <- Achieved.SSBratio
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["SSB_OFL"]] <- Achieved.SSB
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["SPR_OFL"]] <- Achieved.SPR
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Recruitment_OFL"]] <- Achieved.Rec
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Forecatch_OFL"]] <- achieved.report
       
     }else if(fitting_ABC==TRUE){
       search_step<-0.00001 #Set search step to small value so it doesn't trigger continued loops this value is only needed during the Benchmark MSY search
@@ -878,40 +1040,40 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
       FScale<-F.ABC #Set the F target to F.ABC for rescaling annual F values
       
       if(n_groups>1){
-        projection_results[["Group_Catch_ABC"]]<-list()
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_ABC"]]<-list()
         for(i in 1:n_groups){
           Achieved.Catch.group <- apply(TimeFit3[1:terminal_year,Catch_cols3[fleets_by_group[[i]]],drop=FALSE],1,sum)
-          projection_results[["Group_Catch_ABC"]][[i]]<-Achieved.Catch.group
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_ABC"]][[i]]<-Achieved.Catch.group
         }
       }
       
-      projection_results[["Catch_ABC"]] <- Achieved.Catch
-      projection_results[["F_ABC"]] <- Achieved.F
-      projection_results[["Depletion_ABC"]] <- Achieved.SSBratio
-      projection_results[["SSB_ABC"]] <- Achieved.SSB
-      projection_results[["SPR_ABC"]] <- Achieved.SPR
-      projection_results[["Recruitment_ABC"]] <- Achieved.Rec
-      projection_results[["Forecatch_ABC"]] <- achieved.report
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Catch_ABC"]] <- Achieved.Catch
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["F_ABC"]] <- Achieved.F
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Depletion_ABC"]] <- Achieved.SSBratio
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["SSB_ABC"]] <- Achieved.SSB
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["SPR_ABC"]] <- Achieved.SPR
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Recruitment_ABC"]] <- Achieved.Rec
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Forecatch_ABC"]] <- achieved.report
     }else if(fitting_F0==TRUE){
       search_step<-0.00001 #Set search step to small value so it doesn't trigger continued loops this value is only needed during the Benchmark MSY search
       DepletionScale<-1 #Set depletion scale to 1 so it doesn't trigger continued loops now that Benchmark search is complete
       FScale<-0 #Set the F target to 0 for rescaling annual F values
       
       if(n_groups>1){
-        projection_results[["Group_Catch_F0"]]<-list()
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_F0"]]<-list()
         for(i in 1:n_groups){
           Achieved.Catch.group <- apply(TimeFit3[1:terminal_year,Catch_cols3[fleets_by_group[[i]]],drop=FALSE],1,sum)
-          projection_results[["Group_Catch_F0"]][[i]]<-Achieved.Catch.group
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_F0"]][[i]]<-Achieved.Catch.group
         }
       }
       
-      projection_results[["Catch_F0"]] <- Achieved.Catch
-      projection_results[["F_F0"]] <- Achieved.F
-      projection_results[["Depletion_F0"]] <- Achieved.SSBratio
-      projection_results[["SSB_F0"]] <- Achieved.SSB
-      projection_results[["SPR_F0"]] <- Achieved.SPR
-      projection_results[["Recruitment_F0"]] <- Achieved.Rec
-      projection_results[["Forecatch_F0"]] <- achieved.report
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Catch_F0"]] <- Achieved.Catch
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["F_F0"]] <- Achieved.F
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Depletion_F0"]] <- Achieved.SSBratio
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["SSB_F0"]] <- Achieved.SSB
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["SPR_F0"]] <- Achieved.SPR
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Recruitment_F0"]] <- Achieved.Rec
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Forecatch_F0"]] <- achieved.report
     }else if(fitting_Rebuild==TRUE){
       search_step<-0.00001 #Set search step to small value so it doesn't trigger continued loops this value is only needed during the Benchmark MSY search
       DepletionScale<-1 #Set depletion scale to 1 so it doesn't trigger continued loops now that Benchmark search is complete
@@ -931,20 +1093,20 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
         Rebuild.Scale <- 0
       }
       if(n_groups>1){
-        projection_results[["Group_Catch_Rebuild"]]<-list()
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_Rebuild"]]<-list()
         for(i in 1:n_groups){
           Achieved.Catch.group <- apply(TimeFit3[1:terminal_year,Catch_cols3[fleets_by_group[[i]]],drop=FALSE],1,sum)
-          projection_results[["Group_Catch_Rebuild"]][[i]]<-Achieved.Catch.group
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_Rebuild"]][[i]]<-Achieved.Catch.group
         }
       }
       
-      projection_results[["Catch_Rebuild"]] <- Achieved.Catch
-      projection_results[["F_Rebuild"]] <- Achieved.F
-      projection_results[["Depletion_Rebuild"]] <- Achieved.SSBratio
-      projection_results[["SSB_Rebuild"]] <- Achieved.SSB
-      projection_results[["SPR_Rebuild"]] <- Achieved.SPR
-      projection_results[["Recruitment_Rebuild"]] <- Achieved.Rec
-      projection_results[["Forecatch_Rebuild"]] <- achieved.report
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Catch_Rebuild"]] <- Achieved.Catch
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["F_Rebuild"]] <- Achieved.F
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Depletion_Rebuild"]] <- Achieved.SSBratio
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["SSB_Rebuild"]] <- Achieved.SSB
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["SPR_Rebuild"]] <- Achieved.SPR
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Recruitment_Rebuild"]] <- Achieved.Rec
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Forecatch_Rebuild"]] <- achieved.report
     }else if (fitting_Fixed_Catch==TRUE){
       
       search_step<-0.00001 #Set search step to small value so it doesn't trigger continued loops this value is only needed during the Benchmark MSY search
@@ -957,13 +1119,13 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
       
       Fmult4[is.na(Fmult4)] <- 1
       
-      projection_results[[paste0("Catch_FixedCatch_",CC_loop)]] <- Achieved.Catch
-      projection_results[[paste0("F_FixedCatch_",CC_loop)]] <- Achieved.F
-      projection_results[[paste0("Depletion_FixedCatch_",CC_loop)]] <- Achieved.SSBratio
-      projection_results[[paste0("SSB_FixedCatch_",CC_loop)]] <- Achieved.SSB
-      projection_results[[paste0("SPR_FixedCatch_",CC_loop)]] <- Achieved.SPR
-      projection_results[[paste0("Recruitment_FixedCatch_",CC_loop)]] <- Achieved.Rec
-      projection_results[[paste0("Forecatch_FixedCatch_",CC_loop)]] <- achieved.report
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("Catch_FixedCatch_",CC_loop)]] <- Achieved.Catch
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("F_FixedCatch_",CC_loop)]] <- Achieved.F
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("Depletion_FixedCatch_",CC_loop)]] <- Achieved.SSBratio
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("SSB_FixedCatch_",CC_loop)]] <- Achieved.SSB
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("SPR_FixedCatch_",CC_loop)]] <- Achieved.SPR
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("Recruitment_FixedCatch_",CC_loop)]] <- Achieved.Rec
+      projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("Forecatch_FixedCatch_",CC_loop)]] <- achieved.report
     }
     
     #Fmult2 calculations define the multiplier for adjusting annual F values
@@ -1216,280 +1378,556 @@ run.projections<-function(assessment_dir, #Here you set the location of a previo
     forecast[["ForeCatch"]] <- forecast_F
     #Write the modified forecast data out to a file and rerun projections
     unlink(paste0(getwd(),"/forecast.ss"))
-    SS_writeforecast(mylist=forecast,overwrite = TRUE)
+    r4ss::SS_writeforecast(mylist=forecast,overwrite = TRUE, verbose = Verbose)
     
-    if(run_in_MSE==TRUE){
-      SSMSE:::run_EM(EM_dir = getwd(), verbose = TRUE, check_converged = TRUE)
-    }else{
-      shell(paste("cd /d ",getwd()," && ",SS_exe," -nohess",sep=""))
+    dir <- normalizePath(getwd())
+    if(Run_in_MSE==FALSE){
+      bin <- file.path(dir,SS_exe)
     }
+    if (os == "unix") {
+      system(
+        paste0(
+          "cd ", dir, ";", paste0(bin, " "),
+          admb_options
+        ),
+        ignore.stdout = TRUE
+      )
+    } else {
+      system(paste0(paste0(bin, " "), admb_options),
+             invisible = TRUE, ignore.stdout = TRUE,
+             show.output.on.console = FALSE
+      )
+    }
+    Sys.sleep(0.05)
+    
     #If all values have converged check if this is the OFL, ABC, or Rebuild loop
     if(keepFitting==FALSE){
       if(fitting_Fixed_Catch){
-        
-        
-        
+        if(Messages == TRUE){
+          message(paste0("Constant Catch target ",CC_loop," of ",length(Const_Catch)," achieved for allocation loop ",allocation_loop," of ",N_allocation_scenarios))
+        }
         if(Calc_Hessian==TRUE | Do_Pstar==TRUE){
+          admb_options <- ""
           start$last_estimation_phase <- 10
-          SS_writestarter(mylist=start,overwrite = TRUE)
+          r4ss::SS_writestarter(mylist=start,overwrite = TRUE, verbose = Verbose)
           
-          if(run_in_MSE==TRUE){
-            SSMSE:::run_EM(EM_dir = getwd(), hess=TRUE, verbose = TRUE, check_converged = TRUE)
-          }else{
-            shell(paste("cd /d ",getwd()," && ",SS_exe,"",sep=""))
+          dir <- normalizePath(getwd())
+          if(Run_in_MSE==FALSE){
+            bin <- file.path(dir,SS_exe)
           }
+          if (os == "unix") {
+            system(
+              paste0(
+                "cd ", dir, ";", paste0(bin, " "),
+                admb_options
+              ),
+              ignore.stdout = TRUE
+            )
+          } else {
+            system(paste0(paste0(bin, " "), admb_options),
+                   invisible = TRUE, ignore.stdout = TRUE,
+                   show.output.on.console = FALSE
+            )
+          }
+          Sys.sleep(0.05)
           
-          resultsFit <- SS_output(dir=getwd(),covar=FALSE)
+          resultsFit <- r4ss::SS_output(dir=getwd(),covar=FALSE, verbose = Verbose, printstats= Verbose)
           
-          projection_results[[paste0("Param_CC_",CC_loop)]] <- resultsFit$parameters[,c(2,3,11,12)]
-          projection_results[[paste0("F_sd_CC_",CC_loop)]] <- resultsFit$parameters[grep("F_fleet",resultsFit$parameters$Label),c(2,3,11,12)]
-          projection_results[[paste0("SSB_sd_CC_",CC_loop)]] <- resultsFit$derived_quants[grep("SSB_",resultsFit$derived_quants$Label),1:3]
-          projection_results[[paste0("Recr_sd_CC_",CC_loop)]] <- resultsFit$derived_quants[grep("Recr_",resultsFit$derived_quants$Label),1:3]
-          projection_results[[paste0("ForeCatchF_CC_",CC_loop)]] <- resultsFit$derived_quants[grep("F_",resultsFit$derived_quants$Label),1:3]
-          projection_results[[paste0("ForeCatchF_CC_",CC_loop)]] <- projection_results[[paste0("ForeCatchF_CC_",CC_loop)]][-grep("annF_",projection_results[[paste0("ForeCatchF_CC_",CC_loop)]][,"Label"]),]
-          projection_results[[paste0("ForeCatchDead_CC_",CC_loop)]] <- resultsFit$derived_quants[grep("ForeCatch_",resultsFit$derived_quants$Label),1:3]
-          projection_results[[paste0("ForeCatchRetained_CC_",CC_loop)]] <- resultsFit$derived_quants[grep("ForeCatchret_",resultsFit$derived_quants$Label),1:3]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("Param_CC_",CC_loop)]] <- resultsFit$parameters[,c(2,3,11,12)]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("F_sd_CC_",CC_loop)]] <- resultsFit$parameters[grep("F_fleet",resultsFit$parameters$Label),c(2,3,11,12)]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("SSB_sd_CC_",CC_loop)]] <- resultsFit$derived_quants[grep("SSB_",resultsFit$derived_quants$Label),1:3]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("Recr_sd_CC_",CC_loop)]] <- resultsFit$derived_quants[grep("Recr_",resultsFit$derived_quants$Label),1:3]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("ForeCatchF_CC_",CC_loop)]] <- resultsFit$derived_quants[grep("F_",resultsFit$derived_quants$Label),1:3]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("ForeCatchF_CC_",CC_loop)]] <- projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("ForeCatchF_CC_",CC_loop)]][-grep("annF_",projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("ForeCatchF_CC_",CC_loop)]][,"Label"]),]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("ForeCatchDead_CC_",CC_loop)]] <- resultsFit$derived_quants[grep("ForeCatch_",resultsFit$derived_quants$Label),1:3]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("ForeCatchRetained_CC_",CC_loop)]] <- resultsFit$derived_quants[grep("ForeCatchret_",resultsFit$derived_quants$Label),1:3]
           
           start$last_estimation_phase <- 0
-          SS_writestarter(mylist=start,overwrite = TRUE)
+          r4ss::SS_writestarter(mylist=start,overwrite = TRUE, verbose = Verbose)
         }
-        
-        if(dir.exists(paste0(assessment_dir,"/CC_",CC_loop))){
-          unlink(paste0(assessment_dir,"/CC_",CC_loop),recursive = TRUE)
+        admb_options <- "-nohess"
+        if(allocation_loop==1){
+          if(dir.exists(paste0(Assessment_dir,"/CC_",CC_loop))){
+            unlink(paste0(Assessment_dir,"/CC_",CC_loop),recursive = TRUE)
+          }
+          dir.create(paste0(Assessment_dir,"/CC_",CC_loop))
+          temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
+          file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/CC_",CC_loop,"/",temp.files))
+          
+          CC_ForeCatch_1 <- forecast_F
         }
-        dir.create(paste0(assessment_dir,"/CC_",CC_loop))
-        temp.files <- list.files(path=paste0(assessment_dir,"/Working_dir"))
-        file.copy(from=paste0(assessment_dir,'/Working_dir/',temp.files),to=paste0(assessment_dir,"/CC_",CC_loop,"/",temp.files))
+        dir.create(paste0(Assessment_dir,"/CC_",CC_loop,"/Allocation_run_",allocation_loop))
+        temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
+        file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/CC_",CC_loop,"/Allocation_run_",allocation_loop,"/",temp.files))
         
-        if(length(Const_Catch)>CC_loop){
+        if(allocation_loop<N_allocation_scenarios){
+          allocation_loop <- allocation_loop+1
+          keepFitting <- TRUE
+        }else if(length(Const_Catch)>CC_loop){
+          allocation_loop <- 1
           CC_loop <- CC_loop + 1
           Catch_Target <- rep(Const_Catch[CC_loop],forecast[["Nforecastyrs"]])
           if(Catch_trunc > 0){
             Catch_Target[(forecast$Nforecastyrs-c((Catch_trunc-1):0))] <- 0
           }
           keepFitting <- TRUE
+          
+          #Return ForeCatch F's to the first allocation estimate from last 
+          #constant catch this should be closer to the real solution.
+          
+          forecast_F <- CC_ForeCatch_1 
+          forecast[["ForeCatch"]] <- forecast_F
+          unlink(paste0(getwd(),"/forecast.ss"))
+          r4ss::SS_writeforecast(mylist=forecast,overwrite = TRUE, verbose = Verbose)
         }
+        Allocations <- Allocation_tracker[[allocation_loop]]  
       }else if(fitting_Benchmark==TRUE){
-        fitting_Benchmark <- FALSE
-        fitting_OFL <- TRUE
-        par(mfrow=c(4,2))
-        loop <- 0
-        method <- "OFL"
-        keepFitting <- TRUE
-        
+        if(Messages == TRUE){
+          message(paste0("Benchmark target achieved for allocation loop ",allocation_loop," of ",N_allocation_scenarios))
+        }
         if(Calc_Hessian==TRUE | Do_Pstar==TRUE){
+          admb_options <- ""
           start$last_estimation_phase <- 10
-          SS_writestarter(mylist=start,overwrite = TRUE)
+          r4ss::SS_writestarter(mylist=start,overwrite = TRUE, verbose = Verbose)
           
-          if(run_in_MSE==TRUE){
-            SSMSE:::run_EM(EM_dir = getwd(), hess=TRUE, verbose = TRUE, check_converged = TRUE)
-          }else{
-            shell(paste("cd /d ",getwd()," && ",SS_exe,"",sep=""))
+          dir <- normalizePath(getwd())
+          if(Run_in_MSE==FALSE){
+            bin <- file.path(dir,SS_exe)
           }
+          if (os == "unix") {
+            system(
+              paste0(
+                "cd ", dir, ";", paste0(bin, " "),
+                admb_options
+              ),
+              ignore.stdout = TRUE
+            )
+          } else {
+            system(paste0(paste0(bin, " "), admb_options),
+                   invisible = TRUE, ignore.stdout = TRUE,
+                   show.output.on.console = FALSE
+            )
+          }
+          Sys.sleep(0.05)
           
-          resultsFit <- SS_output(dir=getwd(),covar=FALSE)
           
-          projection_results[["Param_Benchmark"]] <- resultsFit$parameters[,c(2,3,11,12)]
-          projection_results[["F_sd_Benchmark"]] <- resultsFit$parameters[grep("F_fleet",resultsFit$parameters$Label),c(2,3,11,12)]
-          projection_results[["SSB_sd_Benchmark"]] <- resultsFit$derived_quants[grep("SSB_",resultsFit$derived_quants$Label),1:3]
-          projection_results[["Recr_sd_Benchmark"]] <- resultsFit$derived_quants[grep("Recr_",resultsFit$derived_quants$Label),1:3]
-          projection_results[["ForeCatchF_Benchmark"]] <- resultsFit$derived_quants[grep("F_",resultsFit$derived_quants$Label),1:3]
-          projection_results[["ForeCatchF_Benchmark"]] <- projection_results[["ForeCatchF_Benchmark"]][-grep("annF_",projection_results[["ForeCatchF_Benchmark"]][,"Label"]),]
-          projection_results[["ForeCatchDead_Benchmark"]] <- resultsFit$derived_quants[grep("ForeCatch_",resultsFit$derived_quants$Label),1:3]
-          projection_results[["ForeCatchRetained_Benchmark"]] <- resultsFit$derived_quants[grep("ForeCatchret_",resultsFit$derived_quants$Label),1:3]
+          resultsFit <- r4ss::SS_output(dir=getwd(),covar=FALSE, verbose = Verbose, printstats= Verbose)
+          
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["Param_Benchmark"]] <- resultsFit$parameters[,c(2,3,11,12)]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["F_sd_Benchmark"]] <- resultsFit$parameters[grep("F_fleet",resultsFit$parameters$Label),c(2,3,11,12)]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["SSB_sd_Benchmark"]] <- resultsFit$derived_quants[grep("SSB_",resultsFit$derived_quants$Label),1:3]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["Recr_sd_Benchmark"]] <- resultsFit$derived_quants[grep("Recr_",resultsFit$derived_quants$Label),1:3]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_Benchmark"]] <- resultsFit$derived_quants[grep("F_",resultsFit$derived_quants$Label),1:3]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_Benchmark"]] <- projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_Benchmark"]][-grep("annF_",projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_Benchmark"]][,"Label"]),]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchDead_Benchmark"]] <- resultsFit$derived_quants[grep("ForeCatch_",resultsFit$derived_quants$Label),1:3]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchRetained_Benchmark"]] <- resultsFit$derived_quants[grep("ForeCatchret_",resultsFit$derived_quants$Label),1:3]
           
           start$last_estimation_phase <- 0
-          SS_writestarter(mylist=start,overwrite = TRUE)
+          r4ss::SS_writestarter(mylist=start,overwrite = TRUE, verbose = Verbose)
         }
+        admb_options <- "-nohess"
         #Write out the Benchmark results to a new folder (replace any old folder that exists)
-        if(dir.exists(paste0(assessment_dir,"/Benchmark_target"))){
-          unlink(paste0(assessment_dir,"/Benchmark_target"),recursive = TRUE)
+        if(allocation_loop==1){
+          if(dir.exists(paste0(Assessment_dir,"/Benchmark_target"))){
+            unlink(paste0(Assessment_dir,"/Benchmark_target"),recursive = TRUE)
+          }
+          dir.create(paste0(Assessment_dir,"/Benchmark_target"))
+          temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
+          file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/Benchmark_target/",temp.files))
+          
+          Benchmark_ForeCatch_1 <- forecast_F
         }
-        dir.create(paste0(assessment_dir,"/Benchmark_target"))
-        temp.files <- list.files(path=paste0(assessment_dir,"/Working_dir"))
-        file.copy(from=paste0(assessment_dir,'/Working_dir/',temp.files),to=paste0(assessment_dir,"/Benchmark_target/",temp.files))
+        dir.create(paste0(Assessment_dir,"/Benchmark_target","/Allocation_run_",allocation_loop))
+        temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
+        file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/Benchmark_target/","/Allocation_run_",allocation_loop,"/",temp.files))
         
-        forecast$fcast_rec_option <- catch_rec 
-        SS_writeforecast(mylist=forecast,overwrite = TRUE)
+        if(allocation_loop<N_allocation_scenarios){
+          allocation_loop <- allocation_loop+1
+          keepFitting <- TRUE
+        }else {
+          if(Messages == TRUE){
+            message(paste0("Beginning OFL optimization"))
+          }
+          allocation_loop <- 1
+          fitting_Benchmark <- FALSE
+          fitting_OFL <- TRUE
+          par(mfrow=c(4,2))
+          loop <- 0
+          method <- "OFL"
+          keepFitting <- TRUE
+          forecast$fcast_rec_option <- OFL_recruit_setting 
+          forecast_F <- Benchmark_ForeCatch_1 
+          forecast[["ForeCatch"]] <- forecast_F
+          r4ss::SS_writeforecast(mylist=forecast,overwrite = TRUE, verbose = Verbose)
+        }
+        Allocations <- Allocation_tracker[[allocation_loop]]  
       }else if(fitting_OFL==TRUE){
-        fitting_OFL <- FALSE
-        par(mfrow=c(4,2))
-        
+        if(Messages == TRUE){
+          message(paste0("OFL target achieved for allocation loop ",allocation_loop," of ",N_allocation_scenarios))
+        }
         if(Calc_Hessian==TRUE){
+          admb_options <- ""
           start$last_estimation_phase <- 10
-          SS_writestarter(mylist=start,overwrite = TRUE)
+          r4ss::SS_writestarter(mylist=start,overwrite = TRUE, verbose = Verbose)
           
-          if(run_in_MSE==TRUE){
-            SSMSE:::run_EM(EM_dir = getwd(), hess=TRUE, verbose = TRUE, check_converged = TRUE)
-          }else{
-            shell(paste("cd /d ",getwd()," && ",SS_exe,"",sep=""))
+          dir <- normalizePath(getwd())
+          if(Run_in_MSE==FALSE){
+            bin <- file.path(dir,SS_exe)
           }
+          if (os == "unix") {
+            system(
+              paste0(
+                "cd ", dir, ";", paste0(bin, " "),
+                admb_options
+              ),
+              ignore.stdout = TRUE
+            )
+          } else {
+            system(paste0(paste0(bin, " "), admb_options),
+                   invisible = TRUE, ignore.stdout = TRUE,
+                   show.output.on.console = FALSE
+            )
+          }
+          Sys.sleep(0.05)
           
-          resultsFit <- SS_output(dir=getwd(),covar=FALSE)
           
-          projection_results[["Param_OFL"]] <- resultsFit$parameters[,c(2,3,11,12)]
-          projection_results[["F_sd_OFL"]] <- resultsFit$parameters[grep("F_fleet",resultsFit$parameters$Label),c(2,3,11,12)]
-          projection_results[["SSB_sd_OFL"]] <- resultsFit$derived_quants[grep("SSB_",resultsFit$derived_quants$Label),1:3]
-          projection_results[["Recr_sd_OFL"]] <- resultsFit$derived_quants[grep("Recr_",resultsFit$derived_quants$Label),1:3]
-          projection_results[["ForeCatchF_OFL"]] <- resultsFit$derived_quants[grep("F_",resultsFit$derived_quants$Label),1:3]
-          projection_results[["ForeCatchF_OFL"]] <- projection_results[["ForeCatchF_OFL"]][-grep("annF_",projection_results[["ForeCatchF_OFL"]][,"Label"]),]
-          projection_results[["ForeCatchDead_OFL"]] <- resultsFit$derived_quants[grep("ForeCatch_",resultsFit$derived_quants$Label),1:3]
-          projection_results[["ForeCatchRetained_OFL"]] <- resultsFit$derived_quants[grep("ForeCatchret_",resultsFit$derived_quants$Label),1:3]
+          resultsFit <- r4ss::SS_output(dir=getwd(),covar=FALSE, verbose = Verbose, printstats= Verbose)
+          
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["Param_OFL"]] <- resultsFit$parameters[,c(2,3,11,12)]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["F_sd_OFL"]] <- resultsFit$parameters[grep("F_fleet",resultsFit$parameters$Label),c(2,3,11,12)]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["SSB_sd_OFL"]] <- resultsFit$derived_quants[grep("SSB_",resultsFit$derived_quants$Label),1:3]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["Recr_sd_OFL"]] <- resultsFit$derived_quants[grep("Recr_",resultsFit$derived_quants$Label),1:3]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_OFL"]] <- resultsFit$derived_quants[grep("F_",resultsFit$derived_quants$Label),1:3]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_OFL"]] <- projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_OFL"]][-grep("annF_",projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_OFL"]][,"Label"]),]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchDead_OFL"]] <- resultsFit$derived_quants[grep("ForeCatch_",resultsFit$derived_quants$Label),1:3]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchRetained_OFL"]] <- resultsFit$derived_quants[grep("ForeCatchret_",resultsFit$derived_quants$Label),1:3]
           
           start$last_estimation_phase <- 0
-          SS_writestarter(mylist=start,overwrite = TRUE)
+          r4ss::SS_writestarter(mylist=start,overwrite = TRUE, verbose = Verbose)
         }
+        admb_options <- "-nohess"
         
-        if(!is.null(ABC_Fraction)){
-          #If in the OLF loop then reset to keep fitting and change the target from OFL to ABC
-          loop <- 0
-          method <- "ABC"
-          keepFitting <- TRUE
-          fitting_ABC <- TRUE
-        }else if(!is.null(Rebuild_yr)){
-          #If in the OLF loop then reset to keep fitting and change the target from OFL to Rebuild
-          loop <- 0
-          method <- "Rebuild"
-          keepFitting <- TRUE
-          fitting_Rebuild <- TRUE
-        }else if(Calc_F0==TRUE){
-          loop <- 0
-          method <- "F0"
-          keepFitting <- TRUE
-          fitting_F0 <- TRUE
+        if(allocation_loop==1){
+          #Write out the OFL results to a new folder (replace any old folder that exists)
+          if(dir.exists(paste0(Assessment_dir,"/OFL_target"))){
+            unlink(paste0(Assessment_dir,"/OFL_target"),recursive = TRUE)
+          }
+          dir.create(paste0(Assessment_dir,"/OFL_target"))
+          temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
+          file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/OFL_target/",temp.files))
+          
+          OFL_ForeCatch_1 <- forecast_F
         }
-        #Write out the OFL results to a new folder (replace any old folder that exists)
-        if(dir.exists(paste0(assessment_dir,"/OFL_target"))){
-          unlink(paste0(assessment_dir,"/OFL_target"),recursive = TRUE)
+        dir.create(paste0(Assessment_dir,"/OFL_target","/Allocation_run_",allocation_loop))
+        temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
+        file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/OFL_target/","/Allocation_run_",allocation_loop,"/",temp.files))
+        
+        if(allocation_loop<N_allocation_scenarios){
+          allocation_loop <- allocation_loop+1
+          keepFitting <- TRUE
+        }else {
+          fitting_OFL <- FALSE
+          par(mfrow=c(4,2))
+          forecast_F <- OFL_ForeCatch_1 
+          forecast[["ForeCatch"]] <- forecast_F
+          allocation_loop <- 1
+          if(!is.null(ABC_Fraction)){
+            if(Messages == TRUE){
+              message(paste0("Beginning ABC optimization"))
+            }
+            #If in the OLF loop then reset to keep fitting and change the target from OFL to ABC
+            loop <- 0
+            method <- "ABC"
+            forecast$fcast_rec_option <- ABC_recruit_setting
+            r4ss::SS_writeforecast(mylist=forecast,overwrite = TRUE, verbose = Verbose)
+            keepFitting <- TRUE
+            fitting_ABC <- TRUE
+          }else if(Calc_F0==TRUE){
+            if(Messages == TRUE){
+              message(paste0("Beginning F0 optimization"))
+            }
+            loop <- 0
+            method <- "F0"
+            forecast$fcast_rec_option <- F0_recruit_setting
+            r4ss::SS_writeforecast(mylist=forecast,overwrite = TRUE, verbose = Verbose)
+            keepFitting <- TRUE
+            fitting_F0 <- TRUE
+          }else if(!is.null(Rebuild_yr)){
+            if(Messages == TRUE){
+              message(paste0("Beginning Rebuild optimization"))
+            }
+            #If in the OLF loop then reset to keep fitting and change the target from OFL to Rebuild
+            loop <- 0
+            method <- "Rebuild"
+            forecast$fcast_rec_option <- Rebuild_recruit_setting
+            r4ss::SS_writeforecast(mylist=forecast,overwrite = TRUE, verbose = Verbose)
+            keepFitting <- TRUE
+            fitting_Rebuild <- TRUE
+          }
         }
-        dir.create(paste0(assessment_dir,"/OFL_target"))
-        temp.files <- list.files(path=paste0(assessment_dir,"/Working_dir"))
-        file.copy(from=paste0(assessment_dir,'/Working_dir/',temp.files),to=paste0(assessment_dir,"/OFL_target/",temp.files))
+        Allocations <- Allocation_tracker[[allocation_loop]]  
       }else if(fitting_ABC==TRUE){
-        fitting_ABC <- FALSE
-        
+        if(Messages == TRUE){
+          message(paste0("ABC target achieved for allocation loop ",allocation_loop," of ",N_allocation_scenarios))
+        }
         if(Calc_Hessian==TRUE){
+          admb_options <- ""
           start$last_estimation_phase <- 10
-          SS_writestarter(mylist=start,overwrite = TRUE)
+          r4ss::SS_writestarter(mylist=start,overwrite = TRUE, verbose = Verbose)
           
-          if(run_in_MSE==TRUE){
-            SSMSE:::run_EM(EM_dir = getwd(), hess=TRUE, verbose = TRUE, check_converged = TRUE)
-          }else{
-            shell(paste("cd /d ",getwd()," && ",SS_exe,"",sep=""))
+          dir <- normalizePath(getwd())
+          if(Run_in_MSE==FALSE){
+            bin <- file.path(dir,SS_exe)
           }
+          if (os == "unix") {
+            system(
+              paste0(
+                "cd ", dir, ";", paste0(bin, " "),
+                admb_options
+              ),
+              ignore.stdout = TRUE
+            )
+          } else {
+            system(paste0(paste0(bin, " "), admb_options),
+                   invisible = TRUE, ignore.stdout = TRUE,
+                   show.output.on.console = FALSE
+            )
+          }
+          Sys.sleep(0.05)
           
-          resultsFit <- SS_output(dir=getwd(),covar=FALSE)
           
-          projection_results[["Param_ABC"]] <- resultsFit$parameters[,c(2,3,11,12)]
-          projection_results[["F_sd_ABC"]] <- resultsFit$parameters[grep("F_fleet",resultsFit$parameters$Label),c(2,3,11,12)]
-          projection_results[["SSB_sd_ABC"]] <- resultsFit$derived_quants[grep("SSB_",resultsFit$derived_quants$Label),1:3]
-          projection_results[["Recr_sd_ABC"]] <- resultsFit$derived_quants[grep("Recr_",resultsFit$derived_quants$Label),1:3]
-          projection_results[["ForeCatchF_ABC"]] <- resultsFit$derived_quants[grep("F_",resultsFit$derived_quants$Label),1:3]
-          projection_results[["ForeCatchF_ABC"]] <- projection_results[["ForeCatchF_ABC"]][-grep("annF_",projection_results[["ForeCatchF_ABC"]][,"Label"]),]
-          projection_results[["ForeCatchDead_ABC"]] <- resultsFit$derived_quants[grep("ForeCatch_",resultsFit$derived_quants$Label),1:3]
-          projection_results[["ForeCatchRetained_ABC"]] <- resultsFit$derived_quants[grep("ForeCatchret_",resultsFit$derived_quants$Label),1:3]
+          resultsFit <- r4ss::SS_output(dir=getwd(),covar=FALSE, verbose = Verbose, printstats= Verbose)
+          
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["Param_ABC"]] <- resultsFit$parameters[,c(2,3,11,12)]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["F_sd_ABC"]] <- resultsFit$parameters[grep("F_fleet",resultsFit$parameters$Label),c(2,3,11,12)]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["SSB_sd_ABC"]] <- resultsFit$derived_quants[grep("SSB_",resultsFit$derived_quants$Label),1:3]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["Recr_sd_ABC"]] <- resultsFit$derived_quants[grep("Recr_",resultsFit$derived_quants$Label),1:3]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_ABC"]] <- resultsFit$derived_quants[grep("F_",resultsFit$derived_quants$Label),1:3]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_ABC"]] <- projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_ABC"]][-grep("annF_",projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_ABC"]][,"Label"]),]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchDead_ABC"]] <- resultsFit$derived_quants[grep("ForeCatch_",resultsFit$derived_quants$Label),1:3]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchRetained_ABC"]] <- resultsFit$derived_quants[grep("ForeCatchret_",resultsFit$derived_quants$Label),1:3]
           
           start$last_estimation_phase <- 0
-          SS_writestarter(mylist=start,overwrite = TRUE)
+          r4ss::SS_writestarter(mylist=start,overwrite = TRUE, verbose = Verbose)
         }
+        admb_options <- "-nohess"
         
-        if(!is.null(Rebuild_yr)){
-          #If in the ABC loop then reset to keep fitting and change the target from ABC to Rebuild
-          loop <- 0
-          method <- "Rebuild"
-          keepFitting <- TRUE
-          fitting_Rebuild <- TRUE
-        }else if(Calc_F0==TRUE){
-          loop <- 0
-          method <- "F0"
-          keepFitting <- TRUE
-          fitting_F0 <- TRUE
-        }
-        #If on the ABC loop write out the P* results to a new folder (replace any old folder that exists)
-        if(dir.exists(paste0(assessment_dir,"/ABC_target"))){
-          unlink(paste0(assessment_dir,"/ABC_target"),recursive = TRUE)
-        }
-        dir.create(paste0(assessment_dir,"/ABC_target"))
-        temp.files <- list.files(path=paste0(assessment_dir,"/Working_dir"))
-        file.copy(from=paste0(assessment_dir,'/Working_dir/',temp.files),to=paste0(assessment_dir,"/ABC_target/",temp.files))
-      }else if(fitting_Rebuild==TRUE){
-        fitting_Rebuild <- FALSE
-        
-        if(Calc_Hessian==TRUE){
-          start$last_estimation_phase <- 10
-          SS_writestarter(mylist=start,overwrite = TRUE)
-          
-          if(run_in_MSE==TRUE){
-            SSMSE:::run_EM(EM_dir = getwd(), hess=TRUE, verbose = TRUE, check_converged = TRUE)
-          }else{
-            shell(paste("cd /d ",getwd()," && ",SS_exe,"",sep=""))
+        if(allocation_loop==1){
+          #Write out the OFL results to a new folder (replace any old folder that exists)
+          if(dir.exists(paste0(Assessment_dir,"/ABC_target"))){
+            unlink(paste0(Assessment_dir,"/ABC_target"),recursive = TRUE)
           }
+          dir.create(paste0(Assessment_dir,"/ABC_target"))
+          temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
+          file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/ABC_target/",temp.files))
           
-          resultsFit <- SS_output(dir=getwd(),covar=FALSE)
-          
-          projection_results[["Param_Rebuild"]] <- resultsFit$parameters[,c(2,3,11,12)]
-          projection_results[["F_sd_Rebuild"]] <- resultsFit$parameters[grep("F_fleet",resultsFit$parameters$Label),c(2,3,11,12)]
-          projection_results[["SSB_sd_Rebuild"]] <- resultsFit$derived_quants[grep("SSB_",resultsFit$derived_quants$Label),1:3]
-          projection_results[["Recr_sd_Rebuild"]] <- resultsFit$derived_quants[grep("Recr_",resultsFit$derived_quants$Label),1:3]
-          projection_results[["ForeCatchF_Rebuild"]] <- resultsFit$derived_quants[grep("F_",resultsFit$derived_quants$Label),1:3]
-          projection_results[["ForeCatchF_Rebuild"]] <- projection_results[["ForeCatchF_Rebuild"]][-grep("annF_",projection_results[["ForeCatchF_Rebuild"]][,"Label"]),]
-          projection_results[["ForeCatchDead_Rebuild"]] <- resultsFit$derived_quants[grep("ForeCatch_",resultsFit$derived_quants$Label),1:3]
-          projection_results[["ForeCatchRetained_Rebuild"]] <- resultsFit$derived_quants[grep("ForeCatchret_",resultsFit$derived_quants$Label),1:3]
-          
-          start$last_estimation_phase <- 0
-          SS_writestarter(mylist=start,overwrite = TRUE)
+          ABC_ForeCatch_1 <- forecast_F
         }
+        dir.create(paste0(Assessment_dir,"/ABC_target","/Allocation_run_",allocation_loop))
+        temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
+        file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/ABC_target/","/Allocation_run_",allocation_loop,"/",temp.files))
         
-        if(Calc_F0==TRUE){
-          loop <- 0
-          method <- "F0"
+        if(allocation_loop<N_allocation_scenarios){
+          allocation_loop <- allocation_loop+1
           keepFitting <- TRUE
-          fitting_F0 <- TRUE
+        }else {
+          fitting_ABC <- FALSE
+          par(mfrow=c(4,2))
+          forecast_F <- ABC_ForeCatch_1 
+          forecast[["ForeCatch"]] <- forecast_F
+          allocation_loop <- 1
+          if(Calc_F0==TRUE){
+            if(Messages == TRUE){
+              message(paste0("Beginning F0 optimization"))
+            }
+            loop <- 0
+            method <- "F0"
+            forecast$fcast_rec_option <- F0_recruit_setting
+            r4ss::SS_writeforecast(mylist=forecast,overwrite = TRUE, verbose = Verbose)
+            keepFitting <- TRUE
+            fitting_F0 <- TRUE
+          }else if(!is.null(Rebuild_yr)){
+            if(Messages == TRUE){
+              message(paste0("Beginning Rebuild optimization"))
+            }
+            #If in the ABC loop then reset to keep fitting and change the target from ABC to Rebuild
+            loop <- 0
+            method <- "Rebuild"
+            forecast$fcast_rec_option <- Rebuild_recruit_setting
+            r4ss::SS_writeforecast(mylist=forecast,overwrite = TRUE, verbose = Verbose)
+            keepFitting <- TRUE
+            fitting_Rebuild <- TRUE
+          }
         }
-        #If on the Rebuild loop write out the Rebuild results to a new folder (replace any old folder that exists) and end the fitting process
-        if(dir.exists(paste0(assessment_dir,"/Rebuild_target"))){
-          unlink(paste0(assessment_dir,"/Rebuild_target"),recursive = TRUE)
-        }
-        dir.create(paste0(assessment_dir,"/Rebuild_target"))
-        temp.files <- list.files(path=paste0(assessment_dir,"/Working_dir"))
-        file.copy(from=paste0(assessment_dir,'/Working_dir/',temp.files),to=paste0(assessment_dir,"/Rebuild_target/",temp.files))
+        Allocations <- Allocation_tracker[[allocation_loop]]  
+        
       }else if(fitting_F0==TRUE){
-        
+        if(Messages == TRUE){
+          message(paste0("F0 target achieved for allocation loop ",allocation_loop," of ",N_allocation_scenarios))
+        }
         if(Calc_Hessian==TRUE){
+          admb_options <- ""
           start$last_estimation_phase <- 10
-          SS_writestarter(mylist=start,overwrite = TRUE)
+          r4ss::SS_writestarter(mylist=start,overwrite = TRUE, verbose = Verbose)
           
-          if(run_in_MSE==TRUE){
-            SSMSE:::run_EM(EM_dir = getwd(), hess=TRUE, verbose = TRUE, check_converged = TRUE)
-          }else{
-            shell(paste("cd /d ",getwd()," && ",SS_exe,"",sep=""))
+          dir <- normalizePath(getwd())
+          if(Run_in_MSE==FALSE){
+            bin <- file.path(dir,SS_exe)
           }
+          if (os == "unix") {
+            system(
+              paste0(
+                "cd ", dir, ";", paste0(bin, " "),
+                admb_options
+              ),
+              ignore.stdout = TRUE
+            )
+          } else {
+            system(paste0(paste0(bin, " "), admb_options),
+                   invisible = TRUE, ignore.stdout = TRUE,
+                   show.output.on.console = FALSE
+            )
+          }
+          Sys.sleep(0.05)
           
-          resultsFit <- SS_output(dir=getwd(),covar=FALSE)
           
-          projection_results[["Param_F0"]] <- resultsFit$parameters[,c(2,3,11,12)]
-          projection_results[["F_sd_F0"]] <- resultsFit$parameters[grep("F_fleet",resultsFit$parameters$Label),c(2,3,11,12)]
-          projection_results[["SSB_sd_F0"]] <- resultsFit$derived_quants[grep("SSB_",resultsFit$derived_quants$Label),1:3]
-          projection_results[["Recr_sd_F0"]] <- resultsFit$derived_quants[grep("Recr_",resultsFit$derived_quants$Label),1:3]
-          projection_results[["ForeCatchF_F0"]] <- resultsFit$derived_quants[grep("F_",resultsFit$derived_quants$Label),1:3]
-          projection_results[["ForeCatchF_F0"]] <- projection_results[["ForeCatchF_F0"]][-grep("annF_",projection_results[["ForeCatchF_F0"]][,"Label"]),]
-          projection_results[["ForeCatchDead_F0"]] <- resultsFit$derived_quants[grep("ForeCatch_",resultsFit$derived_quants$Label),1:3]
-          projection_results[["ForeCatchRetained_F0"]] <- resultsFit$derived_quants[grep("ForeCatchret_",resultsFit$derived_quants$Label),1:3]
+          resultsFit <- r4ss::SS_output(dir=getwd(),covar=FALSE, verbose = Verbose, printstats= Verbose)
+          
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["Param_F0"]] <- resultsFit$parameters[,c(2,3,11,12)]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["F_sd_F0"]] <- resultsFit$parameters[grep("F_fleet",resultsFit$parameters$Label),c(2,3,11,12)]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["SSB_sd_F0"]] <- resultsFit$derived_quants[grep("SSB_",resultsFit$derived_quants$Label),1:3]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["Recr_sd_F0"]] <- resultsFit$derived_quants[grep("Recr_",resultsFit$derived_quants$Label),1:3]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_F0"]] <- resultsFit$derived_quants[grep("F_",resultsFit$derived_quants$Label),1:3]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_F0"]] <- projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_F0"]][-grep("annF_",projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_F0"]][,"Label"]),]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchDead_F0"]] <- resultsFit$derived_quants[grep("ForeCatch_",resultsFit$derived_quants$Label),1:3]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchRetained_F0"]] <- resultsFit$derived_quants[grep("ForeCatchret_",resultsFit$derived_quants$Label),1:3]
           
           start$last_estimation_phase <- 0
-          SS_writestarter(mylist=start,overwrite = TRUE)
+          r4ss::SS_writestarter(mylist=start,overwrite = TRUE, verbose = Verbose)
+        }
+        admb_options <- "-nohess"
+        
+        if(allocation_loop==1){
+          #Write out the OFL results to a new folder (replace any old folder that exists)
+          if(dir.exists(paste0(Assessment_dir,"/F0_target"))){
+            unlink(paste0(Assessment_dir,"/F0_target"),recursive = TRUE)
+          }
+          dir.create(paste0(Assessment_dir,"/F0_target"))
+          temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
+          file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/F0_target/",temp.files))
+          
+          F0_ForeCatch_1 <- forecast_F
+        }
+        dir.create(paste0(Assessment_dir,"/F0_target","/Allocation_run_",allocation_loop))
+        temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
+        file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/F0_target/","/Allocation_run_",allocation_loop,"/",temp.files))
+        
+        if(allocation_loop<N_allocation_scenarios){
+          allocation_loop <- allocation_loop+1
+          keepFitting <- TRUE
+        }else {
+          fitting_F0 <- FALSE
+          par(mfrow=c(4,2))
+          forecast_F <- OFL_ForeCatch_1 
+          forecast[["ForeCatch"]] <- forecast_F
+          allocation_loop <- 1
+          if(!is.null(Rebuild_yr)){
+            if(Messages == TRUE){
+              message(paste0("Beginning Rebuild optimization"))
+            }
+            loop <- 0
+            method <- "Rebuild"
+            forecast$fcast_rec_option <- Rebuild_recruit_setting
+            r4ss::SS_writeforecast(mylist=forecast,overwrite = TRUE, verbose = Verbose)
+            keepFitting <- TRUE
+            fitting_Rebuild <- TRUE
+          }
         }
         
-        if(dir.exists(paste0(assessment_dir,"/F0_target"))){
-          unlink(paste0(assessment_dir,"/F0_target"),recursive = TRUE)
+        Allocations <- Allocation_tracker[[allocation_loop]]  
+      }else if(fitting_Rebuild==TRUE){
+        if(Messages == TRUE){
+          message(paste0("Rebuild target achieved for allocation loop ",allocation_loop," of ",N_allocation_scenarios))
         }
-        dir.create(paste0(assessment_dir,"/F0_target"))
-        temp.files <- list.files(path=paste0(assessment_dir,"/Working_dir"))
-        file.copy(from=paste0(assessment_dir,'/Working_dir/',temp.files),to=paste0(assessment_dir,"/F0_target/",temp.files))
+        if(Calc_Hessian==TRUE){
+          admb_options <- ""
+          start$last_estimation_phase <- 10
+          r4ss::SS_writestarter(mylist=start,overwrite = TRUE, verbose = Verbose)
+          
+          dir <- normalizePath(getwd())
+          if(Run_in_MSE==FALSE){
+            bin <- file.path(dir,SS_exe)
+          }
+          if (os == "unix") {
+            system(
+              paste0(
+                "cd ", dir, ";", paste0(bin, " "),
+                admb_options
+              ),
+              ignore.stdout = TRUE
+            )
+          } else {
+            system(paste0(paste0(bin, " "), admb_options),
+                   invisible = TRUE, ignore.stdout = TRUE,
+                   show.output.on.console = FALSE
+            )
+          }
+          Sys.sleep(0.05)
+          
+          
+          resultsFit <- r4ss::SS_output(dir=getwd(),covar=FALSE, verbose = Verbose, printstats= Verbose)
+          
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["Param_Rebuild"]] <- resultsFit$parameters[,c(2,3,11,12)]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["F_sd_Rebuild"]] <- resultsFit$parameters[grep("F_fleet",resultsFit$parameters$Label),c(2,3,11,12)]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["SSB_sd_Rebuild"]] <- resultsFit$derived_quants[grep("SSB_",resultsFit$derived_quants$Label),1:3]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["Recr_sd_Rebuild"]] <- resultsFit$derived_quants[grep("Recr_",resultsFit$derived_quants$Label),1:3]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_Rebuild"]] <- resultsFit$derived_quants[grep("F_",resultsFit$derived_quants$Label),1:3]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_Rebuild"]] <- projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_Rebuild"]][-grep("annF_",projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_Rebuild"]][,"Label"]),]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchDead_Rebuild"]] <- resultsFit$derived_quants[grep("ForeCatch_",resultsFit$derived_quants$Label),1:3]
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchRetained_Rebuild"]] <- resultsFit$derived_quants[grep("ForeCatchret_",resultsFit$derived_quants$Label),1:3]
+          
+          start$last_estimation_phase <- 0
+          r4ss::SS_writestarter(mylist=start,overwrite = TRUE, verbose = Verbose)
+        }
+        admb_options <- "-nohess"
+        
+        if(allocation_loop==1){
+          #Write out the OFL results to a new folder (replace any old folder that exists)
+          if(dir.exists(paste0(Assessment_dir,"/Rebuild_target"))){
+            unlink(paste0(Assessment_dir,"/Rebuild_target"),recursive = TRUE)
+          }
+          dir.create(paste0(Assessment_dir,"/Rebuild_target"))
+          temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
+          file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/Rebuild_target/",temp.files))
+          
+          Rebuild_ForeCatch_1 <- forecast_F
+        }
+        dir.create(paste0(Assessment_dir,"/Rebuild_target","/Allocation_run_",allocation_loop))
+        temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
+        file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/Rebuild_target/","/Allocation_run_",allocation_loop,"/",temp.files))
+        
+        if(allocation_loop<N_allocation_scenarios){
+          allocation_loop <- allocation_loop+1
+          keepFitting <- TRUE
+        }else {
+          fitting_Rebuild <- FALSE
+          par(mfrow=c(4,2))
+          forecast_F <- Rebuild_ForeCatch_1 
+          forecast[["ForeCatch"]] <- forecast_F
+          allocation_loop <- 1
+        }
+        Allocations <- Allocation_tracker[[allocation_loop]]  
+        
       }
     }
   }
   setwd(oldwd)
+  if(Messages == TRUE){
+    message(paste0("Projection run complete"))
+  }
+  if(return_warnings==TRUE){
+    warning(paste0(combinded_warnings))
+  }
   
   return(projection_results)
 }
