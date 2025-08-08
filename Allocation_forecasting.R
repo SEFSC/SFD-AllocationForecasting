@@ -798,20 +798,21 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
       loop <- loop - 1
     }else{
       
-    if(max(abs(achieved.report[,'F']-forecast_F[,"Catch or F"])[adjusted_F_OFL])>0.1){
-      if(fitting_Fixed_Catch==TRUE){
-        if(Catch_trunc >= (forecast$Nforecastyrs - 20)){
-          Catch_trunc <- Catch_trunc + 1
-        }else{
-          Catch_trunc <- Catch_trunc + 5
-        }
-        Catch_Target[(forecast$Nforecastyrs-c((Catch_trunc-1):0))] <- 0
-        forecast_F[(length(forecast_F[,1])-c((Catch_trunc*length(seasons)*length(F_cols)-1):0)),4] <- 0
-      }
-      F_maxed <- max(achieved.report[,'F'])
-      forecast_F[,4] <- achieved.report[,'F']
-      loop <- loop - 1
-    }else {
+    # if(max(abs(achieved.report[,'F']-forecast_F[,"Catch or F"])[adjusted_F_OFL])>0.1){
+    #   if(fitting_Fixed_Catch==TRUE){
+    #     if(Catch_trunc >= (forecast$Nforecastyrs - 20)){
+    #       Catch_trunc <- Catch_trunc + 1
+    #     }else{
+    #       Catch_trunc <- Catch_trunc + 5
+    #     }
+    #     Catch_Target[(forecast$Nforecastyrs-c((Catch_trunc-1):0))] <- 0
+    #     forecast_F[(length(forecast_F[,1])-c((Catch_trunc*length(seasons)*length(F_cols)-1):0)),4] <- 0
+    #   }
+    #   F_maxed <- max(achieved.report[,'F'])
+    #   forecast_F[,4] <- achieved.report[,'F']
+    #   loop <- loop - 1
+    # }else 
+    {
     if(fitting_Benchmark==TRUE){
       
       #Calculate the average F at equilibrium that all F's will be scaled to in order
@@ -1362,11 +1363,11 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
     zero_Fs <- which(forecast_F[,4]==0)
     increase_Fs <- which(Comb_Mult>1)
     if(length(zero_Fs)>0 & length(increase_Fs)>0){
-      mod_Fs <- zero_Fs[is.element(zero_Fs,increase_Fs)]
+     mod_Fs <- zero_Fs[which(is.element(zero_Fs,increase_Fs))]
       if(length(mod_Fs)>0){
-        message("F value being reset from 0 to 0.0005 this shouldn't happen so check results")
-        forecast_F[mod_Fs,4] <- 0.0005
-        Comb_Mult[mod_Fs] <- 1.01
+        message("F values being reset from 0 to initial average this shouldn't happen so check results")
+        forecast_F[mod_Fs,4] <- Forecast_catch_setup[mod_Fs,4]
+        Comb_Mult[mod_Fs] <- runif(length(mod_Fs),0.95,1.05)
       }
     }
     forecast_F[,4] <- forecast_F[,4]*Comb_Mult
