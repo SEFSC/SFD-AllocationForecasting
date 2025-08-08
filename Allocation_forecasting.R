@@ -504,12 +504,14 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
   forecast[["InputBasis"]] <- -1
   forecast[["ForeCatch"]] <- forecast_F
   forecast[["FirstYear_for_caps_and_allocations"]] <- (dat[["endyr"]]+forecast[["Nforecastyrs"]]+1)
+  forecast[["N_forecast_loops"]] <- 2
   
   keepFitting <- TRUE
   loop <- 0
   subloop <- 0
   F_maxed <- 100000
   
+  max_F_limit <- ctl$maxF
   F_adjust1 <- F_adjust2 <- 1
   F_adjust3 <- rep(1,forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols))
   search_step <- MSY_step 
@@ -1115,7 +1117,7 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
       
       Fmult4 <- rep(Catch_Target/Achieved.Catch.All,each=(length(seasons)*length(F_cols)))
       
-      Fmult4 <- ifelse(forecast_F[,4]>=1.5,ifelse(Fmult4>1,1,Fmult4),Fmult4)
+      Fmult4 <- ifelse(forecast_F[,4]>=max_F_limit,ifelse(Fmult4>1,1,Fmult4),Fmult4)
       
       Fmult4[is.na(Fmult4)] <- 1
       
@@ -1149,7 +1151,7 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
           }else{
             temp_F <- SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))][-zero_catch]
           }
-          temp_F[temp_F>1.5] <- 1.5
+          temp_F[temp_F>max_F_limit] <- max_F_limit
           temp_F[temp_F<(min(0.001,FScale))] <- min(0.001,FScale)
           Fmult2[-zero_catch] <- FScale/temp_F
         }
@@ -1161,7 +1163,7 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
         }else{
           temp_F <- SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))]
         }
-        temp_F[temp_F>1.5] <- 1.5
+        temp_F[temp_F>max_F_limit] <- max_F_limit
         temp_F[temp_F<(min(0.001,FScale))] <- min(0.001,FScale)
         Fmult2 <- FScale/temp_F
       }
@@ -1183,14 +1185,14 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
           Fmult2[adjusted_Rebuild_F_Rebuild[-zero_rebuild]] <- 0
         }else{
           Fmult2[adjusted_Rebuild_F_Rebuild[zero_rebuild]] <- 2
-          temp_F[temp_F>1.5] <- 1.5
+          temp_F[temp_F>max_F_limit] <- max_F_limit
           temp_F[temp_F<(min(0.001,Rebuild.Scale))] <- min(0.001,Rebuild.Scale)
           Fmult2[adjusted_Rebuild_F_Rebuild[-zero_rebuild]] <- Rebuild.Scale/temp_F[-zero_rebuild]
         }
       }else if(Rebuild.Scale==0){
         Fmult2[adjusted_Rebuild_F_Rebuild] <- 0
       }else{
-        temp_F[temp_F>1.5] <- 1.5
+        temp_F[temp_F>max_F_limit] <- max_F_limit
         temp_F[temp_F<(min(0.001,Rebuild.Scale))] <- min(0.001,Rebuild.Scale)
         Fmult2[adjusted_Rebuild_F_Rebuild] <- Rebuild.Scale/temp_F
       }
@@ -1322,7 +1324,7 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
       Fmult4[fixed_ref] <- 1
     }
     Comb_Mult <- Fmult1*Fmult2*Fmult3*Fmult4
-    Comb_Mult[which(forecast_F[,4]>=F_maxed)] <- 1
+    Comb_Mult[which(forecast_F[,4]>=max_F_limit & Comb_Mult>1)] <- 1
     
     #Record the previous adjustment values so they can be used to optimize 
     #step sizes to speed up target convergence	
@@ -1362,8 +1364,9 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
     if(length(zero_Fs)>0 & length(increase_Fs)>0){
       mod_Fs <- zero_Fs[is.element(zero_Fs,increase_Fs)]
       if(length(mod_Fs)>0){
-        forecast_F[mod_Fs,4] <- 0.05
-        Comb_Mult[mod_Fs] <- 1
+        message("F value being reset from 0 to 0.0005 this shouldn't happen so check results")
+        forecast_F[mod_Fs,4] <- 0.0005
+        Comb_Mult[mod_Fs] <- 1.01
       }
     }
     forecast_F[,4] <- forecast_F[,4]*Comb_Mult
