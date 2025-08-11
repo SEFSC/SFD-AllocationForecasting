@@ -509,13 +509,15 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
   keepFitting <- TRUE
   loop <- 0
   subloop <- 0
-  F_maxed <- 100000
+  Curr_max_mult <- Last_max_mult <- F_maxed <- 100000
   
+  global_adjuster <- 1
   max_F_limit <- ctl$maxF
   F_adjust1 <- F_adjust2 <- 1
   F_adjust3 <- rep(1,forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols))
   search_step <- MSY_step 
   Fmult1 <- Fmult2 <- Fmult3 <- Fmult4 <- rep(1.01,forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols))
+  Fmult1_raw <- Fmult2_raw <- Fmult3_raw <- Fmult4_raw <- rep(1.01,forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols))
   Fmult2a <- Fmult2b <- 1
   First_run<-TRUE
   
@@ -648,9 +650,13 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
     SPRfit <- SPRfit[SPRfit[,"Yr"]>dat[["endyr"]],]
     loop <- loop + 1
     if(Make_plots==TRUE){
-      par(mar=c(4,3,3,2))
-      plot(SPRfit[SPRfit[,"Yr"]>=dat[["endyr"]],"F_report"],xlab="year",ylab="F",main = paste0(method," loop = ",loop))
-      plot(SPRfit[SPRfit[,"Yr"]>=dat[["endyr"]],"Deplete"],xlab="year",ylab="Depletion",main = paste0(method," loop = ",loop))
+      try(
+        {
+          par(mar=c(4,3,3,2))
+          plot(SPRfit[SPRfit[,"Yr"]>=dat[["endyr"]],"F_report"],xlab="year",ylab="F",main = paste0(method," loop = ",loop))
+          plot(SPRfit[SPRfit[,"Yr"]>=dat[["endyr"]],"Deplete"],xlab="year",ylab="Depletion",main = paste0(method," loop = ",loop))
+        }
+      )
     }
     
     if(is.element(loop,c(1,2,3,4,5,10,20,30,40,50,100,200,300,400,500,1000))){
@@ -908,9 +914,9 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
         }
         Target.Rebuild <- Target.Depletion
         Achieved.SSB <- Achieved.Depletion
-        if(max(abs(1-Fmult3))>Allocation.Threshold | 
-		       max(abs(1-Fmult2))>Annual.F.Threshold | 
-		       max(abs(1-Fmult1))>Depletion.Threshold){
+        if(max(abs(1-Fmult3_raw))>Allocation.Threshold | 
+		       max(abs(1-Fmult2_raw))>Annual.F.Threshold | 
+		       max(abs(1-Fmult1_raw))>Depletion.Threshold){
           loop<-loop-1
           subloop<-subloop+1
           if(F_max==TRUE){
@@ -973,22 +979,26 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
         }
         
         if(Make_plots==TRUE){
-          par(mar=c(4,3,3,2))
-          if(F_max==TRUE){
-            plot(x=TimeFit3[,"Yr"],y=apply(TimeFit3[,Catch_cols3,drop=FALSE],1,sum)/TimeFit3[,"Recruit_0"],
-  		       xlab="year",ylab="Total Yield Per Recruit",main = paste0(method," loop = ",loop,".",subloop))
-            plot(x=MSY.Fit[,"depletion"],y=MSY.Fit[,"catch"],xlim=c(0.9*min(MSY.Fit[,3:4]),1.1*max(MSY.Fit[,3:4])),
-  		       xlab="Esimated depletion",ylab="Total Yield Per Recruit",main = paste0(method," loop = ",loop,".",subloop))
-            lines(x=c(MSY.Fit[1,c(4,4)]),y=c(0,2*max(MSY.Fit[,"catch"])),col="dark red")
-            points(x=MSY.Fit[1,3],y=MSY.Fit[1,1],pch=16,col="dark blue")
-          }else{
-            plot(x=TimeFit3[,"Yr"],y=apply(TimeFit3[,Catch_cols3,drop=FALSE],1,sum),
-  		       xlab="year",ylab="Total Yield",main = paste0(method," loop = ",loop,".",subloop))
-            plot(x=MSY.Fit[,"depletion"],y=MSY.Fit[,"catch"],xlim=c(0.9*min(MSY.Fit[,3:4]),1.1*max(MSY.Fit[,3:4])),
-  		       xlab="Esimated depletion",ylab="Total Yield",main = paste0(method," loop = ",loop,".",subloop))
-            lines(x=c(MSY.Fit[1,c(4,4)]),y=c(0,2*max(MSY.Fit[,"catch"])),col="dark red")
-            points(x=MSY.Fit[1,3],y=MSY.Fit[1,1],pch=16,col="dark blue")
-          }
+          try(
+            {
+              par(mar=c(4,3,3,2))
+              if(F_max==TRUE){
+                plot(x=TimeFit3[,"Yr"],y=apply(TimeFit3[,Catch_cols3,drop=FALSE],1,sum)/TimeFit3[,"Recruit_0"],
+      		       xlab="year",ylab="Total Yield Per Recruit",main = paste0(method," loop = ",loop,".",subloop))
+                plot(x=MSY.Fit[,"depletion"],y=MSY.Fit[,"catch"],xlim=c(0.9*min(MSY.Fit[,3:4]),1.1*max(MSY.Fit[,3:4])),
+      		       xlab="Esimated depletion",ylab="Total Yield Per Recruit",main = paste0(method," loop = ",loop,".",subloop))
+                lines(x=c(MSY.Fit[1,c(4,4)]),y=c(0,2*max(MSY.Fit[,"catch"])),col="dark red")
+                points(x=MSY.Fit[1,3],y=MSY.Fit[1,1],pch=16,col="dark blue")
+              }else{
+                plot(x=TimeFit3[,"Yr"],y=apply(TimeFit3[,Catch_cols3,drop=FALSE],1,sum),
+      		       xlab="year",ylab="Total Yield",main = paste0(method," loop = ",loop,".",subloop))
+                plot(x=MSY.Fit[,"depletion"],y=MSY.Fit[,"catch"],xlim=c(0.9*min(MSY.Fit[,3:4]),1.1*max(MSY.Fit[,3:4])),
+      		       xlab="Esimated depletion",ylab="Total Yield",main = paste0(method," loop = ",loop,".",subloop))
+                lines(x=c(MSY.Fit[1,c(4,4)]),y=c(0,2*max(MSY.Fit[,"catch"])),col="dark red")
+                points(x=MSY.Fit[1,3],y=MSY.Fit[1,1],pch=16,col="dark blue")
+              }
+            }
+          )
         }
       }else if(Forecast_target==3){
         search_step<-0.00001
@@ -1130,7 +1140,8 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
       projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("Recruitment_FixedCatch_",CC_loop)]] <- Achieved.Rec
       projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("Forecatch_FixedCatch_",CC_loop)]] <- achieved.report
     }
-    
+      
+    Fmult1_raw <- rep(DepletionScale,forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols))
     #Fmult2 calculations define the multiplier for adjusting annual F values
     #Zero catch years are identified first to prevent divide by zero errors in the scaling and
     #to tell the search algorithm that the target has been achieved
@@ -1198,18 +1209,35 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
         Fmult2[adjusted_Rebuild_F_Rebuild] <- Rebuild.Scale/temp_F
       }
     }
-    
+    Fmult2_raw <- Fmult2
     #Here a range of adjustments are made to the F step sizes based on the expected vs achieved change in F from
     #the previous step. i.e. if the last change only had half the impact expected on F then the next step will
     #be modified to make the next change in F twice as large as the raw change in F estimated.
     
     if(fitting_Fixed_Catch==FALSE){
       if((loop>1 |  subloop>2) & DepletionScale>0 & DepletionScale!=1 & fitting_Benchmark==TRUE & (Forecast_target!=2 | subloop>2)){
-        F_adjust1 <- (F_adjust1 + 1)/2
+        F_adjust1 <- (4*F_adjust1 + global_adjuster)/5
         F_adjust1 <- F_adjust1*(Last_Mult1-1)/(Last_Mult1-DepletionScale)
-        
         if(is.infinite(F_adjust1)){
-          F_adjust1 <- 1
+          F_adjust1 <- global_adjuster
+        }
+        if(is.na(F_adjust1)){
+          F_adjust1 <- global_adjuster
+        }
+        if(is.nan(F_adjust1)){
+          F_adjust1 <- global_adjuster
+        }
+        if(F_adjust1 <= 0){
+          F_adjust1 <- 0.5
+        }
+        if(F_adjust1 <= 0.2){
+          F_adjust1 <- 0.2
+        }
+        if(F_adjust1 >= 2){
+          F_adjust1 <- 2
+        }
+        if(is.infinite(F_adjust1)){
+          F_adjust1 <- global_adjuster
         }else if(F_adjust1>0){
           if(DepletionScale<1){
             DepletionScale <- exp(log(DepletionScale)*F_adjust1)
@@ -1218,55 +1246,76 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
             DepletionScale <- ((DepletionScale-1)*F_adjust1+1)
           }
         }else{
-          F_adjust1 <- 1
+          F_adjust1 <- global_adjuster
         }
-      }else if(loop>1 & min(Fmult2)>0 & (fitting_OFL==TRUE | fitting_ABC==TRUE) & median(Fmult2[adjusted_F_OFL])!=1){
-        F_adjust2 <- (F_adjust2 + 1)/2
-        F_adjust2 <- F_adjust2*(Last_Mult2-1)/(Last_Mult2-median(Fmult2[adjusted_F_OFL]))
+      }
+      if(loop>1 & (fitting_Benchmark==TRUE | fitting_OFL==TRUE | fitting_ABC==TRUE)){
+       
+        F_adjust2 <- (4*F_adjust2 + global_adjuster)/5
+        F_adjust2 <- F_adjust2*(Last_Mult2-1)/(Last_Mult2-Fmult2)
         
-        if(is.infinite(F_adjust2)){
-          F_adjust2 <- 1
-        }else if(F_adjust2 > 0){
-          if(length(Fmult2[Fmult2<1])>0){
-            Fmult2[Fmult2<1] <- exp(log(Fmult2[Fmult2<1])*F_adjust2)
-          }
-          if(length(Fmult2[Fmult2>1])>0){
-            Fmult2[Fmult2>1] <- ((Fmult2[Fmult2>1]-1)*F_adjust2+1)
-          }
-        }else{
-          F_adjust2 <- 1
+        F_adjust2[which(is.infinite(F_adjust2))] <- global_adjuster
+        F_adjust2[which(is.nan(F_adjust2))] <- global_adjuster
+        F_adjust2[which(is.na(F_adjust2))] <- global_adjuster
+        F_adjust2[which(F_adjust2<=0)] <- 0.5
+        F_adjust2[which(F_adjust2>=2)] <- 2
+        F_adjust2[which(F_adjust2<=0.2)] <- 0.2
+        
+        if(length(Fmult2[Fmult2<1])>0){
+          Fmult2[Fmult2<1] <- 
+            exp(log(Fmult2[Fmult2<1])*
+                  F_adjust2[Fmult2<1])
         }
-      }else if(loop>1 & min(Fmult2)>0 & fitting_Rebuild==TRUE & median(Fmult2[adjusted_Rebuild_F_Rebuild])!=1 & median(Fmult2[adjusted_OFL_F_Rebuild])!=1){
-        F_adjust2a <- (Last_Mult2a-1)/(Last_Mult2a-median(Fmult2[adjusted_Rebuild_F_Rebuild]))
-        F_adjust2b <- (Last_Mult2b-1)/(Last_Mult2b-median(Fmult2[adjusted_OFL_F_Rebuild]))
-        if(!is.na(F_adjust2a)){
-          
-          if(is.infinite(F_adjust2a)){
-            F_adjust2a <- 1
-          }else if(F_adjust2a > 0){
-          if(exists("Fmult2a")){
-            Fmult2a <- (Fmult2a + 1)/2
-          }
-          Fmult2a <- Fmult2[adjusted_Rebuild_F_Rebuild]
-          if(length(Fmult2a[Fmult2a<1])>0){
-            Fmult2a[Fmult2a<1] <- exp(log(Fmult2a[Fmult2a<1])*F_adjust2a)
-          }
-          if(length(Fmult2a[Fmult2a>1])>0){
-            Fmult2a[Fmult2a>1] <- ((Fmult2a[Fmult2a>1]-1)*F_adjust2a+1)
-          }
-          Fmult2[adjusted_Rebuild_F_Rebuild] <- Fmult2a
+        if(length(Fmult2[Fmult2>1])>0){
+          Fmult2[Fmult2>1] <- 
+            ((Fmult2[Fmult2>1]-1)*
+               F_adjust2[Fmult2>1]+1)
+        }
+      }
+      if(loop>1 & min(Fmult2)>0 & fitting_Rebuild==TRUE & median(Fmult2[adjusted_Rebuild_F_Rebuild])!=1 & median(Fmult2[adjusted_OFL_F_Rebuild])!=1){
+        if(exists("F_adjust2a")){
+          F_adjust2a <- (F_adjust2a + global_adjuster)/2
         }else{
-          F_adjust2a <- 1
+          F_adjust2a <- global_adjuster
+        }
+        if(exists("F_adjust2b")){
+          F_adjust2b <- (F_adjust2b + global_adjuster)/2
+        }else{
+          F_adjust2b <- global_adjuster
+        }
+        F_adjust2a <- F_adjust2a*(Last_Mult2a-1)/(Last_Mult2a-median(Fmult2[adjusted_Rebuild_F_Rebuild]))
+        F_adjust2b <- F_adjust2b*(Last_Mult2b-1)/(Last_Mult2b-median(Fmult2[adjusted_OFL_F_Rebuild]))
+        if(!is.na(F_adjust2a)){
+          if(is.infinite(F_adjust2a)){
+            F_adjust2a <- global_adjuster
+          }else if(F_adjust2a <= 0){
+            F_adjust2a <- 0.5
+          }
+          if(is.infinite(F_adjust2a)){
+            F_adjust2a <- global_adjuster
+          }else if(F_adjust2a > 0){
+            Fmult2a <- Fmult2[adjusted_Rebuild_F_Rebuild]
+            if(length(Fmult2a[Fmult2a<1])>0){
+              Fmult2a[Fmult2a<1] <- exp(log(Fmult2a[Fmult2a<1])*F_adjust2a)
+            }
+            if(length(Fmult2a[Fmult2a>1])>0){
+              Fmult2a[Fmult2a>1] <- ((Fmult2a[Fmult2a>1]-1)*F_adjust2a+1)
+            }
+            Fmult2[adjusted_Rebuild_F_Rebuild] <- Fmult2a
+        }else{
+          F_adjust2a <- global_adjuster
         }}else{
-          F_adjust2a <- 1
+          F_adjust2a <- global_adjuster
         }
         if(!is.na(F_adjust2b)){
           if(is.infinite(F_adjust2b)){
-            F_adjust2b <- 1
-          }else if(F_adjust2b > 0){
-          if(exists("Fmult2b")){
-            Fmult2b <- (Fmult2b + 1)/2
+            F_adjust2b <- global_adjuster
+          }else if(F_adjust2b <= 0){
+            F_adjust2b <- 0.5
           }
+          if(is.infinite(F_adjust2b)){
+            F_adjust2b <- global_adjuster
+          }else if(F_adjust2b > 0){
           Fmult2b <- Fmult2[adjusted_OFL_F_Rebuild]
           if(length(Fmult2b[Fmult2b<1])>0){
             Fmult2b[Fmult2b<1] <- exp(log(Fmult2b[Fmult2b<1])*F_adjust2b)
@@ -1276,14 +1325,13 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
           }
           Fmult2[adjusted_OFL_F_Rebuild] <- Fmult2b
         }else{
-          F_adjust2b <- 1
+          F_adjust2b <- global_adjuster
         }}else{
-          F_adjust2b <- 1
+          F_adjust2b <- global_adjuster
         }
       }
     }
     Fmult1 <- rep(DepletionScale,forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols))
-   
 	#Here the achieved catch fractions by fishing sector and year are calculated and compared relative 
 	#to the target allocations. An adjustment multiplier is then computed to adjust fleet Fs closer to a
 	#value expected to achieve the target allocations.
@@ -1315,7 +1363,7 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
     }
     
     
-    
+   
 	#Adjust any multipliers of fixed catch values to 1 so that the 
     #search algorithm will consider them to have achieved their target	
     if(!is.null(fixed_ref)){
@@ -1330,31 +1378,55 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
     #Record the previous adjustment values so they can be used to optimize 
     #step sizes to speed up target convergence	
     Last_Mult1 <- DepletionScale
-    Last_Mult2 <- median(Fmult2[adjusted_F_OFL])
+    Last_Mult2 <- Fmult2
     if(!is.null(rebuild_ref)){
     Last_Mult2a <- median(Fmult2[adjusted_Rebuild_F_Rebuild])
     Last_Mult2b <- median(Fmult2[adjusted_OFL_F_Rebuild])
     }else{
-      Last_Mult2a <- 1
-      Last_Mult2b <- 1
+      Last_Mult2a <- 1#rep(1,length(adjusted_F_OFL))
+      Last_Mult2b <- 1#rep(1,length(adjusted_F_OFL))
+    }
+    Last_max_mult <- Curr_max_mult
+    Curr_max_mult <- max(abs(1-Comb_Mult))
+    if(loop > 10){
+      if(Curr_max_mult >= Last_max_mult){
+        global_adjuster <- global_adjuster*0.8
+      }else{
+        global_adjuster <- (4*global_adjuster + 1)/5
+      }
     }
 	#Plot out progess in achieving targets. This is primarily for diagnosis of a 
 	#run that is failing to converge on an answer in a reasonable period of time.
     if(Make_plots==TRUE){
-      par(mar=c(4,3,3,2))
-      col_options <- c("black","dark red","dark green","dark blue","orange","purple","red","green","blue","brown","pink","yellow",colors())
-      point_options <- c(16,15,17,18,8,9,10,11,12,13,0,1,2,3,4,5,6,14,21,22,23,24,25,19,20)
-      plot(Fmult1,xlab="year/season/fleet",ylab="Depletion Adjustment",col=rep(col_options[seq_along(F_cols)],forecast[["Nforecastyrs"]]*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),forecast[["Nforecastyrs"]]),main = paste0(method," loop = ",loop))
-      plot(rep(F_adjust1,forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols)),xlab="year/season/fleet",ylab="Depletion Optimization Adjustment",col=rep(col_options[seq_along(F_cols)],forecast[["Nforecastyrs"]]*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),forecast[["Nforecastyrs"]]),main = paste0(method," loop = ",loop))
-      plot(Fmult2,xlab="year/season/fleet",ylab="F Adjustment",col=rep(col_options[seq_along(F_cols)],forecast[["Nforecastyrs"]]*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),forecast[["Nforecastyrs"]]),main = paste0(method," loop = ",loop))
-      plot(rep(F_adjust2,forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols)),xlab="year/season/fleet",ylab="F Optimization Adjustment",col=rep(col_options[seq_along(F_cols)],forecast[["Nforecastyrs"]]*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),forecast[["Nforecastyrs"]]),main = paste0(method," loop = ",loop))
-      plot(Fmult3,xlab="year/season/fleet",ylab="Allocation Adjustment",col=rep(col_options[seq_along(F_cols)],forecast[["Nforecastyrs"]]*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),forecast[["Nforecastyrs"]]),main = paste0(method," loop = ",loop))
-      plot(F_adjust3,xlab="year/season/fleet",ylab="Allocation Optimization Adjustment",col=rep(col_options[seq_along(F_cols)],forecast[["Nforecastyrs"]]*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),forecast[["Nforecastyrs"]]),main = paste0(method," loop = ",loop))
+      try(
+        {
+          par(mar=c(4,3,3,2))
+          col_options <- c("black","dark red","dark green","dark blue","orange","purple","red","green","blue","brown","pink","yellow",colors())
+          point_options <- c(16,15,17,18,8,9,10,11,12,13,0,1,2,3,4,5,6,14,21,22,23,24,25,19,20)
+          plot(Fmult1,xlab="year/season/fleet",ylab="Depletion Adjustment",col=rep(col_options[seq_along(F_cols)],forecast[["Nforecastyrs"]]*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),forecast[["Nforecastyrs"]]),main = paste0(method," loop = ",loop))
+          plot(rep(F_adjust1,forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols)),xlab="year/season/fleet",ylab="Depletion Optimization Adjustment",col=rep(col_options[seq_along(F_cols)],forecast[["Nforecastyrs"]]*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),forecast[["Nforecastyrs"]]),main = paste0(method," loop = ",loop))
+          plot(Fmult2,xlab="year/season/fleet",ylab="F Adjustment",col=rep(col_options[seq_along(F_cols)],forecast[["Nforecastyrs"]]*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),forecast[["Nforecastyrs"]]),main = paste0(method," loop = ",loop))
+          plot(F_adjust2,xlab="year/season/fleet",ylab="F Optimization Adjustment",col="red",pch=16,main = paste0(method," loop = ",loop))
+          plot(Fmult3,xlab="year/season/fleet",ylab="Allocation Adjustment",col=rep(col_options[seq_along(F_cols)],forecast[["Nforecastyrs"]]*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),forecast[["Nforecastyrs"]]),main = paste0(method," loop = ",loop))
+          plot(F_adjust3,xlab="year/season/fleet",ylab="Allocation Optimization Adjustment",col=rep(col_options[seq_along(F_cols)],forecast[["Nforecastyrs"]]*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),forecast[["Nforecastyrs"]]),main = paste0(method," loop = ",loop))
+        }
+      )
     }
 	#Check if all targets have been achieved and if so stop fitting
-    if(max(abs(1-Fmult1))>=Depletion.Threshold | max(abs(1-Fmult2))>=Annual.F.Threshold | max(abs(1-Fmult3))>=Allocation.Threshold | max(abs(1-Fmult4))>=Annual.F.Threshold | abs(search_step)>Step.Threshold | loop < 2){keepFitting<-TRUE}else{keepFitting<-FALSE}
+    if(max(abs(1-Fmult1_raw))>=Depletion.Threshold | max(abs(1-Fmult2_raw))>=Annual.F.Threshold | max(abs(1-Fmult3))>=Allocation.Threshold | max(abs(1-Fmult4))>=Annual.F.Threshold | abs(search_step)>Step.Threshold | loop < 2){keepFitting<-TRUE}else{keepFitting<-FALSE}
     if(FScale==0 & loop>2 & fitting_Fixed_Catch==FALSE){keepFitting<-FALSE}
-    
+  
+    if(is.element(loop,c(1:10,seq(15,1000,5))) | global_adjuster<1){
+      if(Messages == TRUE){
+        message(paste0("Current loop = ",loop," ; still optimizing = ",keepFitting))
+        message(paste0("Depletion optimization scaler = ",round(max(abs(1-Fmult1_raw)),6)," ; threshold <= ",Depletion.Threshold))
+        message(paste0("Annual F optimization max scaler = ",round(max(abs(1-Fmult2_raw)),6)," ; threshold <= ",Annual.F.Threshold))
+        message(paste0("Allocation optimization max scaler = ",round(max(abs(1-Fmult3)),6)," ; threshold <= ",Allocation.Threshold))
+        message(paste0("Fixed catch optimization max scaler = ",round(max(abs(1-Fmult4)),6)," ; threshold <= ",Annual.F.Threshold))
+        message(paste0("Step size optimization max scaler = ",search_step," ; threshold <= ",Step.Threshold))
+        message(paste0("Global multiplier adjuster = ",global_adjuster))
+      }
+    }  
 	#Here we check that no Fs have been reduced to zero that need some catch
 	#If that has occured repace the zero F with a small starting value 0.05 so that the 
 	#search algorithm can act on it to achieve the true target value.
