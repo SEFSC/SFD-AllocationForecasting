@@ -1556,6 +1556,9 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
     
     #If all values have converged check if this is the OFL, ABC, or Rebuild loop
     if(keepFitting==FALSE){
+      Curr_max_mult <- Last_max_mult <- Min_max_mult <- F_maxed <- 100000
+      global_adjuster <- F_adjust1 <- F_adjust1_2 <- F_adjust2a <- F_adjust2b <- 1
+      F_adjust2 <- F_adjust2_2 <- F_SS_adjust <- F_adjust3 <- rep(1,forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols))
       if(fitting_Fixed_Catch){
         if(Messages == TRUE){
           message(paste0("Constant Catch target ",CC_loop," of ",length(Const_Catch)," achieved for allocation loop ",allocation_loop," of ",N_allocation_scenarios))
