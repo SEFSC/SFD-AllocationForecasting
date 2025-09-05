@@ -1418,6 +1418,8 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
       Fmult2[fixed_ref] <- 1
       Fmult3[fixed_ref] <- 1
       Fmult4[fixed_ref] <- 1
+      Fmult1_raw[fixed_ref] <- 1
+      Fmult2_raw[fixed_ref] <- 1
     }
     Comb_Mult <- Fmult1*Fmult2*Fmult3*Fmult4
     Comb_Mult[which(forecast_F[,4]>=max_F_limit & Comb_Mult>1)] <- 1
@@ -1434,7 +1436,7 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
       Last_Mult2b <- 1#rep(1,length(adjusted_F_OFL))
     }
     Last_max_mult <- Curr_max_mult
-    Curr_max_mult <- max(c(abs(1-Fmult1_raw),abs(1-Fmult2_raw),abs(1-Fmult3),abs(1-Fmult4)))
+    Curr_max_mult <- max(abs(1-Fmult1_raw*Fmult2_raw*Fmult3*Fmult4))
     Min_max_mult <- min(Min_max_mult,Curr_max_mult)
     
     
