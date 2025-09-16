@@ -408,10 +408,11 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
   }
   #5) Update annual fixed F for fleets usually used for interim period catches
   if(!is.null(Annual_fixed_catch)){
+    
     for(i in seq_along(Annual_fixed_catch[,1])){
-      match_row <- which(Forecast_catch_setup[,c("Year")]==forecast$ForeCatch[i,c("Year")] &
-                           Forecast_catch_setup[,c("Seas")]==forecast$ForeCatch[i,c("Seas")] &
-                           Forecast_catch_setup[,c("Fleet")]==forecast$ForeCatch[i,c("Fleet")])
+      match_row <- which(Forecast_catch_setup[,c("Year")]==Annual_fixed_catch[i,c("Year")] &
+                           Forecast_catch_setup[,c("Seas")]==Annual_fixed_catch[i,c("Seas")] &
+                           Forecast_catch_setup[,c("Fleet")]==Annual_fixed_catch[i,c("Fleet")])
       if(is.null(Annual_fixed_catch[i,"Catch or F"])){
         Forecast_catch_setup[match_row,"Catch or F"] <- Annual_fixed_catch[i,"Catch.or.F"]
       }else{
