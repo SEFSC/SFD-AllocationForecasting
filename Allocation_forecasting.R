@@ -474,10 +474,11 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
   #Loop over all allocation scenarios
   for(i in 1:N_allocation_scenarios){
     projection_results[[paste0("Allocation_run_",i)]] <- list()
-    Allocations <- forecast_F[,c(1,2,3,4,5,5)]
+    Allocations <- forecast_F[,c(1,2,3,4,5,5,5)]
     Allocations[,c(4)] <- 0
     Allocations[,c(5,6)] <- 1
-    names(Allocations) <- c("Year","Seas","Fleet","Group","Target","Achieved")
+    Allocations[,c(7)] <- 0
+    names(Allocations) <- c("Year","Seas","Fleet","Group","Target","Achieved","Tracked")
     
     if(n_groups>0){
       if(is.null(Fleet_group)){
@@ -489,6 +490,7 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
         for(j in seq_along(alloc[,1])){
           for(k in seq_along(alloc[j,-1])){
             Allocations[Allocations[,1]>=alloc[,"Year"] & Allocations[,4]==k,5] <- alloc[j,(k+1)]/sum(alloc[j,-1])
+            Allocations[Allocations[,1]>=alloc[,"Year"] & Allocations[,4]==k,7] <- 1
           }
         }
       }else{
@@ -498,6 +500,7 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
         }
         for(j in seq_along(Allocation_targets[1,])){
           Allocations[Allocations[,"Group"]==Allocation_targets[1,j],5] <- Allocation_targets[i+1,j]
+          Allocations[Allocations[,"Group"]==Allocation_targets[1,j],7] <- 1
         }
       }
       for(j in 1:n_groups){
@@ -520,7 +523,7 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
   keepFitting <- TRUE
   loop <- 0
   subloop <- 0
-  Curr_max_mult <- Last_max_mult <- Min_max_mult <- F_maxed <- 100000
+  Curr_max_mult <- Last_max_mult <- Min_max_mult <- F_maxed <- Last_median_mult <- Min_median_mult <- Curr_median_mult <- 100000
   
   global_adjuster <- 1
   max_F_limit <- ctl$maxF
@@ -1404,6 +1407,7 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
         }
       }
       Fmult3 <- (0.5*(Allocations[,5]/Allocations[,6]-1)+1)
+      Fmult3[which(Allocations[,7]==0)] <- 1
     }else{
       Fmult3 <- rep(1,forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols))
     }
@@ -1433,21 +1437,13 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
     Comb_Mult <- Fmult1*Fmult2*Fmult3*Fmult4
     Comb_Mult[which(forecast_F[,4]>=max_F_limit & Comb_Mult>1)] <- 1
     
-    #Record the previous adjustment values so they can be used to optimize 
-    #step sizes to speed up target convergence	
-    Last_Mult1 <- DepletionScale
-    Last_Mult2 <- Fmult2
-    if(!is.null(rebuild_ref)){
-    Last_Mult2a <- median(Fmult2[adjusted_Rebuild_F_Rebuild])
-    Last_Mult2b <- median(Fmult2[adjusted_OFL_F_Rebuild])
-    }else{
-      Last_Mult2a <- 1#rep(1,length(adjusted_F_OFL))
-      Last_Mult2b <- 1#rep(1,length(adjusted_F_OFL))
-    }
-    Last_max_mult <- Curr_max_mult
     Curr_max_mult <- max(abs(1-Fmult1_raw*Fmult2_raw*Fmult3*Fmult4))
+    
+    Curr_median_mult <- median(abs(1-Fmult1_raw*Fmult2_raw*Fmult3*Fmult4))
+    
     Min_max_mult <- min(Min_max_mult,Curr_max_mult)
     
+    Min_median_mult <- min(Min_median_mult,Curr_median_mult)
     
 	#Plot out progess in achieving targets. This is primarily for diagnosis of a 
 	#run that is failing to converge on an answer in a reasonable period of time.
@@ -1472,14 +1468,17 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
   
     if(is.element(loop,c(1:30,seq(35,1000,5))) | global_adjuster<1){
       if(Messages == TRUE){
-        message(paste0("Current loop = ",loop," ; still optimizing = ",keepFitting))
+        message(paste0("Current ",method," loop = ",loop," ; still optimizing = ",keepFitting))
         message(paste0("Depletion optimization scaler = ",round(max(abs(1-Fmult1_raw)),6)," ; threshold <= ",Depletion.Threshold))
         message(paste0("Annual F optimization max scaler = ",round(max(abs(1-Fmult2_raw)),6)," ; threshold <= ",Annual.F.Threshold))
         message(paste0("Allocation optimization max scaler = ",round(max(abs(1-Fmult3)),6)," ; threshold <= ",Allocation.Threshold))
         message(paste0("Fixed catch optimization max scaler = ",round(max(abs(1-Fmult4)),6)," ; threshold <= ",Annual.F.Threshold))
         message(paste0("Step size optimization max scaler = ",search_step," ; threshold <= ",Step.Threshold))
         message(paste0("Global multiplier adjuster = ",global_adjuster))
+        message(paste0("Current max multiplier = ",Curr_max_mult))
         message(paste0("Best max multiplier = ",Min_max_mult))
+        message(paste0("Current median multiplier = ",Curr_median_mult))
+        message(paste0("Best median multiplier = ",Min_median_mult))
       }
     }
     if(is.element(loop,c(50,100,200,500,1000,seq(1500,10000,500)))){
@@ -1503,7 +1502,8 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
       }
     }
     forecast_F[,4] <- forecast_F[,4]*Comb_Mult
-   } }
+    } 
+  }
 	#Now adjust the previous F values by the estimated multiplier to create a 
 	#new estimate of the target Fs, make sure to overwrite any fixed catches 
 	#with their original values.
@@ -1512,32 +1512,34 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
       forecast_F[fixed_ref,4] <- Fixed_catch_target[,4]
     }
     
-    
-    if(loop > 10){
-      if(Curr_max_mult >= Last_max_mult){
-        global_adjuster <- global_adjuster*0.8
-        Min_max_mult <- 1.1*Min_max_mult
-        Depletion.Threshold <- min(Depletion.Threshold*2,Min_max_mult)
-        Annual.F.Threshold <- min(Annual.F.Threshold*2,Min_max_mult)
-        Allocation.Threshold <- min(Allocation.Threshold*2,Min_max_mult)
-      }
-    }
-    if(Curr_max_mult >= Last_max_mult){
+    if(Curr_max_mult > Last_max_mult){
+      browser()
       forecast_F <- last_forecast_F
       global_adjuster <- global_adjuster*0.95
       if(loop > 10){
         global_adjuster <- global_adjuster*0.85
         Min_max_mult <- 1.1*Min_max_mult
-        Depletion.Threshold <- Depletion.Threshold*2
-        Annual.F.Threshold <- Annual.F.Threshold*2
-        Allocation.Threshold <- Allocation.Threshold*2
+        Depletion.Threshold <- min(Depletion.Threshold*2,Min_max_mult)
+        Annual.F.Threshold <- min(Annual.F.Threshold*2,Min_max_mult)
+        Allocation.Threshold <- min(Allocation.Threshold*2,Min_max_mult)
       }
     }else{
       last_forecast_F <- forecast[["ForeCatch"]]
+      #Record the previous adjustment values so they can be used to optimize 
+      #step sizes to speed up target convergence	
+      Last_Mult1 <- DepletionScale
+      Last_Mult2 <- Fmult2
+      if(!is.null(rebuild_ref)){
+        Last_Mult2a <- median(Fmult2[adjusted_Rebuild_F_Rebuild])
+        Last_Mult2b <- median(Fmult2[adjusted_OFL_F_Rebuild])
+      }else{
+        Last_Mult2a <- 1#rep(1,length(adjusted_F_OFL))
+        Last_Mult2b <- 1#rep(1,length(adjusted_F_OFL))
+      }
+      Last_max_mult <- Curr_max_mult
+      Last_median_mult <- Curr_median_mult
     }
-    Depletion.Threshold <- min(Depletion.Threshold,Min_max_mult)
-    Annual.F.Threshold <- min(Annual.F.Threshold,Min_max_mult)
-    Allocation.Threshold <- min(Allocation.Threshold,Min_max_mult)
+    
     forecast[["ForeCatch"]] <- forecast_F
     #Write the modified forecast data out to a file and rerun projections
     unlink(paste0(getwd(),"/forecast.ss"))
@@ -1565,7 +1567,7 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
     
     #If all values have converged check if this is the OFL, ABC, or Rebuild loop
     if(keepFitting==FALSE){
-      Curr_max_mult <- Last_max_mult <- Min_max_mult <- F_maxed <- 100000
+      Curr_max_mult <- Last_max_mult <- Min_max_mult <- F_maxed <- Last_median_mult <- Min_median_mult <- Curr_median_mult <- 100000
       global_adjuster <- F_adjust1 <- F_adjust1_2 <- F_adjust2a <- F_adjust2b <- 1
       F_adjust2 <- F_adjust2_2 <- F_SS_adjust <- F_adjust3 <- rep(1,forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols))
       if(fitting_Fixed_Catch){
