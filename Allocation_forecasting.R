@@ -75,15 +75,14 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
                           MSY_step = 0.1,
                           SS_exe = NULL,
                           Verbose = FALSE,
+                          Keep_Only_Final = FALSE,
+                          Keep_files = 1, #Which run files to keep options(1:All files,2:Minimum subset for r4ss output,3:Only Report)
                           Messages = TRUE
                           ) 
 {
   
   projection_results <- list()
   
-  #SSMSE::report_message("Running the allocation forecasting function.") 
-  
-  #Removed these as inputs as they are not needed yet, could add back to input options later
   if(Messages == TRUE){
     message("Starting projections calculations")
   }
@@ -155,14 +154,44 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
     Const_Catch <- sort(Const_Catch)
   }
   
+  
   #First set up a working director for running projections in (to avoid overwriting the base files with a failed model run)
   #then copy all of the assessment files to this working folder (ignore any output directories that have been previously created)
   if(dir.exists(file.path(getwd(),"Working_dir"))){
     unlink(file.path(getwd(),"Working_dir"), recursive = TRUE)
   }
+  
+  if(dir.exists(file.path(getwd(),"Final"))){
+    unlink(file.path(getwd(),"Final"), recursive = TRUE)
+  }
+  
+  base.files <- list.files(path=Assessment_dir)
+  
   dir.create(file.path(getwd(),"Working_dir"))
   
+  if(Keep_Only_Final==TRUE){
+    if(dir.exists(file.path(getwd(),"OFL_target"))){
+      unlink(file.path(getwd(),"OFL_target"), recursive = TRUE)
+    }
+    if(dir.exists(file.path(getwd(),"ABC_target"))){
+      unlink(file.path(getwd(),"ABC_target"), recursive = TRUE)
+    }
+    if(dir.exists(file.path(getwd(),"Rebuild_target"))){
+      unlink(file.path(getwd(),"Rebuild_target"), recursive = TRUE)
+    }
+    if(dir.exists(file.path(getwd(),"F0_target"))){
+      unlink(file.path(getwd(),"F0_target"), recursive = TRUE)
+    }
+    dir.create(file.path(getwd(),"Final"))
+  }
+  
   if(Benchmark_complete == FALSE){
+
+  if(Keep_Only_Final==TRUE){
+    if(dir.exists(file.path(getwd(),"Benchmark_target"))){
+      unlink(file.path(getwd(),"Benchmark_target"), recursive = TRUE)
+    }
+  }
   temp.files <- list.files(path=Assessment_dir)
   folders <- c(which(temp.files=="Benchmark_target"), which(temp.files=="OFL_target"), which(temp.files=="ABC_target"), which(temp.files=="Rebuild_target"), which(temp.files=="F0_target"), which(temp.files=="Working_dir"))
   if(length(folders)>0){
@@ -178,6 +207,13 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
     file.copy(from = file.path(getwd(),"Benchmark_target",temp.files), to = file.path(getwd(),"Working_dir",temp.files))
   }
   
+  if(Keep_Only_Final==TRUE){
+    base.files <- base.files[!is.element(base.files,c("starter.ss","starter.ss_new","ss.par",
+                                                     start$datfile,start$ctlfile,"Report.sso",
+                                                     "forecast.ss","forecast.ss_new","Forecast-report.sso",
+                                                     "data.ss_new","control.ss_new","wtatage.ss_new"))]
+    unlink(file.path(getwd(),base.files))
+  }
   #Set the new working directory 
   setwd(file.path(getwd(),"Working_dir"))
   
@@ -336,11 +372,35 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
   TargetYears <- TargetYears[,c(2,F_cols2)]
   seasons <- unique(TargetYears[,1])
   F_by_Fleet_seas <- as.data.frame(matrix(apply(TargetYears[TargetYears[,1]==seasons[1],,drop=FALSE], 2, mean),nrow=1,ncol=(length(F_cols)+1)))
+  
   if(length(seasons)>1){
     for(i in seasons[-1]){
       F_by_Fleet_seas <- rbind(F_by_Fleet_seas,apply(TargetYears[TargetYears[,1]==i,,drop=FALSE], 2, mean))
     }
   }
+  
+  if(!is.null(dat$bycatch_fleet_info)){
+    if(length(dat$bycatch_fleet_info[,1])>0){
+      min_bycatch_fcast_yr <- dat$bycatch_fleet_info[,4]
+      min_bycatch_fcast_yr[min_bycatch_fcast_yr<=0] <- dat[["endyr"]]+min_bycatch_fcast_yr[min_bycatch_fcast_yr<=0]
+      max_bycatch_fcast_yr <- dat$bycatch_fleet_info[,5]
+      max_bycatch_fcast_yr[max_bycatch_fcast_yr<=0] <- dat[["endyr"]]+max_bycatch_fcast_yr[max_bycatch_fcast_yr<=0]
+      for(i in seq_along(min_bycatch_fcast_yr)){
+        TargetYears_bycatch <- TimeFit2[TimeFit2$Yr>=min_bycatch_fcast_yr[i] & TimeFit2$Yr<=max_bycatch_fcast_yr[i],]
+        TargetYears_bycatch <- TargetYears_bycatch[,c(2,F_cols2)]
+        seasons <- unique(TargetYears_bycatch[,1])
+        F_by_Fleet_seas_bycatch <- as.data.frame(matrix(apply(TargetYears_bycatch[TargetYears_bycatch[,1]==seasons[1],,drop=FALSE], 2, mean),nrow=1,ncol=(length(F_cols)+1)))
+        
+        if(length(seasons)>1){
+          for(i in seasons[-1]){
+            F_by_Fleet_seas_bycatch <- rbind(F_by_Fleet_seas_bycatch,apply(TargetYears_bycatch[TargetYears_bycatch[,1]==i,,drop=FALSE], 2, mean))
+          }
+        }
+        F_by_Fleet_seas[1,(dat$bycatch_fleet_info[i,1]+1)] <- F_by_Fleet_seas_bycatch[1,(dat$bycatch_fleet_info[i,1]+1)]
+      }
+    }
+  }
+  
   Forecast_target <- forecast[["Forecast"]]
   if(!is.element(Forecast_target,c(1,2,3))){
     stop("forecast should be set to either 1, 2, or 3 so we know what the target is")
@@ -363,7 +423,7 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
   Forecast_catch_setup<-as.data.frame(Forecast_catch_setup)
   colnames(Forecast_catch_setup)<-c("Year","Seas","Fleet","Catch or F","Basis","Fixed","Rebuild")
   #2) Set any fleets with 0 F to a small number so they can be increased if needed
-  Forecast_catch_setup[,"Catch or F"] <- ifelse(Forecast_catch_setup[,"Catch or F"]==0, 0.00000001,Forecast_catch_setup[,"Catch or F"])
+  #Forecast_catch_setup[,"Catch or F"] <- ifelse(Forecast_catch_setup[,"Catch or F"]==0, 0.00000001,Forecast_catch_setup[,"Catch or F"])
 
   #3) Incorporate fixed values from the existing forecast file
   if(!is.null(forecast$ForeCatch)){
@@ -1494,12 +1554,15 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
     zero_Fs <- which(forecast_F[,4]==0)
     increase_Fs <- which(Comb_Mult>1)
     if(length(zero_Fs)>0 & length(increase_Fs)>0){
-     mod_Fs <- zero_Fs[which(is.element(zero_Fs,increase_Fs))]
+     zero_Fs <- zero_Fs[which(Forecast_catch_setup[zero_Fs,4]!=0)]
+     if(length(zero_Fs)>0){
+      mod_Fs <- zero_Fs[which(is.element(zero_Fs,increase_Fs))]
       if(length(mod_Fs)>0){
         message("F values being reset from 0 to initial average this shouldn't happen so check results")
         forecast_F[mod_Fs,4] <- Forecast_catch_setup[mod_Fs,4]
         Comb_Mult[mod_Fs] <- runif(length(mod_Fs),0.95,1.05)
       }
+     }
     }
     forecast_F[,4] <- forecast_F[,4]*Comb_Mult
     } 
@@ -1512,8 +1575,7 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
       forecast_F[fixed_ref,4] <- Fixed_catch_target[,4]
     }
     
-    if(Curr_max_mult > Last_max_mult){
-      browser()
+    if(Curr_median_mult > Last_median_mult){
       forecast_F <- last_forecast_F
       global_adjuster <- global_adjuster*0.95
       if(loop > 10){
@@ -1614,20 +1676,36 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
           r4ss::SS_writestarter(mylist=start,overwrite = TRUE, verbose = Verbose)
         }
         admb_options <- "-nohess"
-        if(allocation_loop==1){
-          if(dir.exists(paste0(Assessment_dir,"/CC_",CC_loop))){
-            unlink(paste0(Assessment_dir,"/CC_",CC_loop),recursive = TRUE)
-          }
-          dir.create(paste0(Assessment_dir,"/CC_",CC_loop))
-          temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
-          file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/CC_",CC_loop,"/",temp.files))
-          
-          CC_ForeCatch_1 <- forecast_F
-        }
-        dir.create(paste0(Assessment_dir,"/CC_",CC_loop,"/Allocation_run_",allocation_loop))
-        temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
-        file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/CC_",CC_loop,"/Allocation_run_",allocation_loop,"/",temp.files))
         
+        temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
+        if(Keep_files==2){
+          temp.files <- temp.files[is.element(temp.files,c("starter.ss","starter.ss_new","ss.par",
+                                                           start$datfile,start$ctlfile,"Report.sso",
+                                                           "forecast.ss","forecast.ss_new","Forecast-report.sso",
+                                                           "data.ss_new","control.ss_new","wtatage.ss_new"))]
+        }else if(Keep_files==3){
+          temp.files <- temp.files[is.element(temp.files,c("Report.sso"))]
+        }
+        
+        if(Keep_Only_Final==TRUE){
+          if(dir.exists(paste0(Assessment_dir,"/Final"))){
+            unlink(paste0(Assessment_dir,"/Final"),recursive = TRUE)
+          }
+          dir.create(paste0(Assessment_dir,"/Final"))
+          file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/Final/",temp.files))
+        }else{
+          if(allocation_loop==1){
+            if(dir.exists(paste0(Assessment_dir,"/CC_",CC_loop))){
+              unlink(paste0(Assessment_dir,"/CC_",CC_loop),recursive = TRUE)
+            }
+            dir.create(paste0(Assessment_dir,"/CC_",CC_loop))
+            file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/CC_",CC_loop,"/",temp.files))
+            
+            CC_ForeCatch_1 <- forecast_F
+          }
+          dir.create(paste0(Assessment_dir,"/CC_",CC_loop,"/Allocation_run_",allocation_loop))
+          file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/CC_",CC_loop,"/Allocation_run_",allocation_loop,"/",temp.files))
+        }
         if(allocation_loop<N_allocation_scenarios){
           allocation_loop <- allocation_loop+1
           keepFitting <- TRUE
@@ -1695,20 +1773,38 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
         }
         admb_options <- "-nohess"
         #Write out the Benchmark results to a new folder (replace any old folder that exists)
+        temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
+        if(Keep_files==2){
+          temp.files <- temp.files[is.element(temp.files,c("starter.ss","starter.ss_new","ss.par",
+                                                           start$datfile,start$ctlfile,"Report.sso",
+                                                           "forecast.ss","forecast.ss_new","Forecast-report.sso",
+                                                           "data.ss_new","control.ss_new","wtatage.ss_new"))]
+        }else if(Keep_files==3){
+          temp.files <- temp.files[is.element(temp.files,c("Report.sso"))]
+        }
+        if(Keep_Only_Final==TRUE){
+          if(dir.exists(paste0(Assessment_dir,"/Final"))){
+            unlink(paste0(Assessment_dir,"/Final"),recursive = TRUE)
+          }
+          dir.create(paste0(Assessment_dir,"/Final"))
+          file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/Final/",temp.files))
+          
+        }else{
         if(allocation_loop==1){
           if(dir.exists(paste0(Assessment_dir,"/Benchmark_target"))){
             unlink(paste0(Assessment_dir,"/Benchmark_target"),recursive = TRUE)
           }
           dir.create(paste0(Assessment_dir,"/Benchmark_target"))
-          temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
           file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/Benchmark_target/",temp.files))
           
           Benchmark_ForeCatch_1 <- forecast_F
         }
         dir.create(paste0(Assessment_dir,"/Benchmark_target","/Allocation_run_",allocation_loop))
-        temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
         file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/Benchmark_target/","/Allocation_run_",allocation_loop,"/",temp.files))
-        
+        }
+        if(allocation_loop==1){
+          Benchmark_ForeCatch_1 <- forecast_F
+        }
         if(allocation_loop<N_allocation_scenarios){
           allocation_loop <- allocation_loop+1
           keepFitting <- TRUE
@@ -1774,22 +1870,39 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
           r4ss::SS_writestarter(mylist=start,overwrite = TRUE, verbose = Verbose)
         }
         admb_options <- "-nohess"
-        
+        temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
+        if(Keep_files==2){
+          temp.files <- temp.files[is.element(temp.files,c("starter.ss","starter.ss_new","ss.par",
+                                                           start$datfile,start$ctlfile,"Report.sso",
+                                                           "forecast.ss","forecast.ss_new","Forecast-report.sso",
+                                                           "data.ss_new","control.ss_new","wtatage.ss_new"))]
+        }else if(Keep_files==3){
+          temp.files <- temp.files[is.element(temp.files,c("Report.sso"))]
+        }
+        if(Keep_Only_Final==TRUE){
+          if(dir.exists(paste0(Assessment_dir,"/Final"))){
+            unlink(paste0(Assessment_dir,"/Final"),recursive = TRUE)
+          }
+          dir.create(paste0(Assessment_dir,"/Final"))
+          file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/Final/",temp.files))
+          
+        }else{
         if(allocation_loop==1){
           #Write out the OFL results to a new folder (replace any old folder that exists)
           if(dir.exists(paste0(Assessment_dir,"/OFL_target"))){
             unlink(paste0(Assessment_dir,"/OFL_target"),recursive = TRUE)
           }
           dir.create(paste0(Assessment_dir,"/OFL_target"))
-          temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
           file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/OFL_target/",temp.files))
           
           OFL_ForeCatch_1 <- forecast_F
         }
         dir.create(paste0(Assessment_dir,"/OFL_target","/Allocation_run_",allocation_loop))
-        temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
         file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/OFL_target/","/Allocation_run_",allocation_loop,"/",temp.files))
-        
+        }
+        if(allocation_loop==1){
+          OFL_ForeCatch_1 <- forecast_F
+        }
         if(allocation_loop<N_allocation_scenarios){
           allocation_loop <- allocation_loop+1
           keepFitting <- TRUE
@@ -1879,22 +1992,39 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
           r4ss::SS_writestarter(mylist=start,overwrite = TRUE, verbose = Verbose)
         }
         admb_options <- "-nohess"
-        
+        temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
+        if(Keep_files==2){
+          temp.files <- temp.files[is.element(temp.files,c("starter.ss","starter.ss_new","ss.par",
+                                                           start$datfile,start$ctlfile,"Report.sso",
+                                                           "forecast.ss","forecast.ss_new","Forecast-report.sso",
+                                                           "data.ss_new","control.ss_new","wtatage.ss_new"))]
+        }else if(Keep_files==3){
+          temp.files <- temp.files[is.element(temp.files,c("Report.sso"))]
+        }
+        if(Keep_Only_Final==TRUE){
+          if(dir.exists(paste0(Assessment_dir,"/Final"))){
+            unlink(paste0(Assessment_dir,"/Final"),recursive = TRUE)
+          }
+          dir.create(paste0(Assessment_dir,"/Final"))
+          file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/Final/",temp.files))
+          
+        }else{
         if(allocation_loop==1){
           #Write out the OFL results to a new folder (replace any old folder that exists)
           if(dir.exists(paste0(Assessment_dir,"/ABC_target"))){
             unlink(paste0(Assessment_dir,"/ABC_target"),recursive = TRUE)
           }
           dir.create(paste0(Assessment_dir,"/ABC_target"))
-          temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
           file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/ABC_target/",temp.files))
           
           ABC_ForeCatch_1 <- forecast_F
         }
         dir.create(paste0(Assessment_dir,"/ABC_target","/Allocation_run_",allocation_loop))
-        temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
         file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/ABC_target/","/Allocation_run_",allocation_loop,"/",temp.files))
-        
+        }
+        if(allocation_loop==1){
+          ABC_ForeCatch_1 <- forecast_F
+        }
         if(allocation_loop<N_allocation_scenarios){
           allocation_loop <- allocation_loop+1
           keepFitting <- TRUE
@@ -1974,22 +2104,39 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
           r4ss::SS_writestarter(mylist=start,overwrite = TRUE, verbose = Verbose)
         }
         admb_options <- "-nohess"
-        
+        temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
+        if(Keep_files==2){
+          temp.files <- temp.files[is.element(temp.files,c("starter.ss","starter.ss_new","ss.par",
+                                                           start$datfile,start$ctlfile,"Report.sso",
+                                                           "forecast.ss","forecast.ss_new","Forecast-report.sso",
+                                                           "data.ss_new","control.ss_new","wtatage.ss_new"))]
+        }else if(Keep_files==3){
+          temp.files <- temp.files[is.element(temp.files,c("Report.sso"))]
+        }
+        if(Keep_Only_Final==TRUE){
+          if(dir.exists(paste0(Assessment_dir,"/Final"))){
+            unlink(paste0(Assessment_dir,"/Final"),recursive = TRUE)
+          }
+          dir.create(paste0(Assessment_dir,"/Final"))
+          file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/Final/",temp.files))
+          
+        }else{
         if(allocation_loop==1){
           #Write out the OFL results to a new folder (replace any old folder that exists)
           if(dir.exists(paste0(Assessment_dir,"/F0_target"))){
             unlink(paste0(Assessment_dir,"/F0_target"),recursive = TRUE)
           }
           dir.create(paste0(Assessment_dir,"/F0_target"))
-          temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
           file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/F0_target/",temp.files))
           
           F0_ForeCatch_1 <- forecast_F
         }
         dir.create(paste0(Assessment_dir,"/F0_target","/Allocation_run_",allocation_loop))
-        temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
         file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/F0_target/","/Allocation_run_",allocation_loop,"/",temp.files))
-        
+        }
+        if(allocation_loop==1){
+          F0_ForeCatch_1 <- forecast_F
+        }
         if(allocation_loop<N_allocation_scenarios){
           allocation_loop <- allocation_loop+1
           keepFitting <- TRUE
@@ -2058,22 +2205,39 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
           r4ss::SS_writestarter(mylist=start,overwrite = TRUE, verbose = Verbose)
         }
         admb_options <- "-nohess"
-        
+        temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
+        if(Keep_files==2){
+          temp.files <- temp.files[is.element(temp.files,c("starter.ss","starter.ss_new","ss.par",
+                                                           start$datfile,start$ctlfile,"Report.sso",
+                                                           "forecast.ss","forecast.ss_new","Forecast-report.sso",
+                                                           "data.ss_new","control.ss_new","wtatage.ss_new"))]
+        }else if(Keep_files==3){
+          temp.files <- temp.files[is.element(temp.files,c("Report.sso"))]
+        }
+        if(Keep_Only_Final==TRUE){
+          if(dir.exists(paste0(Assessment_dir,"/Final"))){
+            unlink(paste0(Assessment_dir,"/Final"),recursive = TRUE)
+          }
+          dir.create(paste0(Assessment_dir,"/Final"))
+          file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/Final/",temp.files))
+          
+        }else{
         if(allocation_loop==1){
           #Write out the OFL results to a new folder (replace any old folder that exists)
           if(dir.exists(paste0(Assessment_dir,"/Rebuild_target"))){
             unlink(paste0(Assessment_dir,"/Rebuild_target"),recursive = TRUE)
           }
           dir.create(paste0(Assessment_dir,"/Rebuild_target"))
-          temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
           file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/Rebuild_target/",temp.files))
           
           Rebuild_ForeCatch_1 <- forecast_F
         }
         dir.create(paste0(Assessment_dir,"/Rebuild_target","/Allocation_run_",allocation_loop))
-        temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
         file.copy(from=paste0(Assessment_dir,'/Working_dir/',temp.files),to=paste0(Assessment_dir,"/Rebuild_target/","/Allocation_run_",allocation_loop,"/",temp.files))
-        
+        }
+        if(allocation_loop==1){
+          Rebuild_ForeCatch_1 <- forecast_F
+        }
         if(allocation_loop<N_allocation_scenarios){
           allocation_loop <- allocation_loop+1
           keepFitting <- TRUE
@@ -2089,10 +2253,17 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
       }
     }
   }
+  
+  if(Keep_Only_Final==TRUE){
+    setwd(normalizePath(paste0(Assessment_dir)))
+    unlink(file.path(getwd(),"Working_dir"), recursive = TRUE)
+  }
+  
   setwd(oldwd)
   if(Messages == TRUE){
     message(paste0("Projection run complete"))
   }
+  
   if(return_warnings==TRUE){
     warning(paste0(combinded_warnings))
   }
