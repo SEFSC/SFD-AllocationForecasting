@@ -71,6 +71,7 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
                           Fleet_group = NULL, #Data frame with columns c("Fleet","Group")specifying fleet grouping for allocations (defaults to forecast file settings if NULL)
                           Group_Allocations = NULL, #Data frame specifying scenarios for allocation of catch between groups (defaults to forecast file settings if NULL)
                           #If not null input a dataframe with a column for each group and row for each scenario.
+                          Fleet_effort_reduction_ratio = NULL, #Input data frame with columns c("Fleet","Ratio") where the ratio determins the rate at which effort declines relative to asymptotic retention to achieve OFL/ABC/ACL targets in projections defaults to 1 which is only effort changes, setting to 0 only retention changes, setting to .5 they are both changed equally. Only applicable if F decreases in projection period otherwise effort increases. 
                           Run_in_MSE = FALSE,
                           MSY_step = 0.1,
                           SS_exe = NULL,
@@ -102,8 +103,19 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
   start <- r4ss::SS_readstarter(verbose = Verbose)
   dat <- r4ss::SS_readdat(file = start$datfile, version = 3.3, verbose = Verbose)
   ctl <- r4ss::SS_readctl(file = start$ctlfile, version = 3.3, use_datlist = TRUE, datlist = dat, verbose = Verbose)
+  ctl_new <- r4ss::SS_readctl(file = "control.ss_new", version = 3.3, use_datlist = TRUE, datlist = dat, verbose = Verbose)
   results <- r4ss::SS_output(dir = getwd(), covar = FALSE, verbose = Verbose, printstats= Verbose)
-  forecast <- r4ss::SS_readforecast(verbose = Verbose)
+  forecast <- r4ss::SS_readforecast(verbose = Verbose) 
+  
+  #Setup a default effort reallocation ratio data frame setting all fleets to 1 
+  effort_reduction_ratio <- data.frame(Fleet=which(dat$fleetinfo$type!=3) ,Ratio=rep(1,length(which(dat$fleetinfo$type!=3))))
+
+  #Overwrite with user input values if specified.
+  if(!is.null(Fleet_effort_reduction_ratio)){
+    for(i in seq_along(Fleet_effort_reduction_ratio[,"Fleet"])){
+      effort_reduction_ratio[Fleet_effort_reduction_ratio[i,"Fleet"],"Ratio"] <- Fleet_effort_reduction_ratio[i,"Ratio"]
+    }
+  }
 
   if(!is.null(forecast$ForeCatch)){
     if(length(grep("year",colnames(forecast$ForeCatch)))==1){
@@ -148,7 +160,7 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
   }else{
     stop("Error: No par file found with name ss.par or ss3.par")
   }
-  admb_options <- "-nohess"
+  admb_options <- "-maxfn 0 -phase 50 -nohess"
   parlist <- r4ss::SS_readpar_3.30(parfile = par_name, datsource = dat, ctlsource = ctl)
 
   if(!is.null(Const_Catch)){
@@ -187,18 +199,17 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
   }
 
   if(Benchmark_complete == FALSE){
-
-  if(Keep_Only_Final==TRUE){
-    if(dir.exists(file.path(getwd(),"Benchmark_target"))){
-      unlink(file.path(getwd(),"Benchmark_target"), recursive = TRUE)
+    if(Keep_Only_Final==TRUE){
+      if(dir.exists(file.path(getwd(),"Benchmark_target"))){
+        unlink(file.path(getwd(),"Benchmark_target"), recursive = TRUE)
+      }
     }
-  }
-  temp.files <- list.files(path=Assessment_dir)
-  folders <- c(which(temp.files=="Benchmark_target"), which(temp.files=="OFL_target"), which(temp.files=="ABC_target"), which(temp.files=="Rebuild_target"), which(temp.files=="F0_target"), which(temp.files=="Working_dir"))
-  if(length(folders)>0){
-    temp.files <- temp.files[-folders]
-  }
-  file.copy(from = file.path(getwd(),temp.files), to = file.path(getwd(),"Working_dir",temp.files))
+    temp.files <- list.files(path=Assessment_dir)
+    folders <- c(which(temp.files=="Benchmark_target"), which(temp.files=="OFL_target"), which(temp.files=="ABC_target"), which(temp.files=="Rebuild_target"), which(temp.files=="F0_target"), which(temp.files=="Working_dir"))
+    if(length(folders)>0){
+      temp.files <- temp.files[-folders]
+    }
+    file.copy(from = file.path(getwd(),temp.files), to = file.path(getwd(),"Working_dir",temp.files))
   }else{
     temp.files <- list.files(path=file.path(getwd(),"Benchmark_target"))
     folders <- which(grep("Allocation_run_",temp.files,fixed=TRUE))
@@ -275,12 +286,12 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
   if(forecast[["stddev_of_log_catch_ratio"]]==0){
     forecast[["stddev_of_log_catch_ratio"]]<-0.001
   }
-
-  #Adjust the starter file to read from par file, perform no fitting (This should already have been done),
-  #and set the depletion value to be relative to unexploited biomass and have no scaling
+  
+  #Adjust the starter file to read from par file, reset estimation phase to 10 to avoid devs bug but use command line to stop estimation
+  #and set the depletion value to be relative to unexploited biomass and have no scaling 
   #(so that correct depletion target can be found).
   start$init_values_src <- 1
-  start$last_estimation_phase <- 0
+  start$last_estimation_phase <- 10 #Turn on just in case it was off.
   start$depl_basis <- 1
   start$depl_denom_frac <- 1
   start$SPR_basis <- SS_raw_spr_setting
@@ -372,8 +383,14 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
   TargetYears <- TimeFit2[TimeFit2$Yr>=min_fcast_yr & TimeFit2$Yr<=max_fcast_yr,]
   TargetYears <- TargetYears[,c(2,F_cols2)]
   seasons <- unique(TargetYears[,1])
-  F_by_Fleet_seas <- as.data.frame(matrix(apply(TargetYears[TargetYears[,1]==seasons[1],,drop=FALSE], 2, mean),nrow=1,ncol=(length(F_cols)+1)))
+  geo_mean <- function(vals){
+    vals <- ifelse(vals==0,0.000000001,vals)
+    geometric_mean <- exp(mean(log(vals)))
+    return(geometric_mean)
+  }
 
+  F_by_Fleet_seas <- as.data.frame(matrix(apply(TargetYears[TargetYears[,1]==seasons[1],,drop=FALSE], 2, geo_mean),nrow=1,ncol=(length(F_cols)+1)))
+  
   if(length(seasons)>1){
     for(i in seasons[-1]){
       F_by_Fleet_seas <- rbind(F_by_Fleet_seas,apply(TargetYears[TargetYears[,1]==i,,drop=FALSE], 2, mean))
@@ -409,24 +426,131 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
 
   #Set up the forecast Forecatch dataframe to specify fixed fishing mortality rates
   #for each fleet for the entire 100 year projection period.
-  #data frame will be build sequentially
-  #1) Set all F's to recent mean from the model
-  Forecast_catch_setup<-matrix(1,nrow=forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols),ncol=7)
+  #data frame will be build sequentially 
+  Forecast_catch_setup<-matrix(1,nrow=forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols),ncol=12)
+  #The first 4 columns will match the forecast forecatch data_frame 
+  #Fill in year 
   Forecast_catch_setup[,1]<-sort(rep((dat[["endyr"]]+1):(dat[["endyr"]]+forecast[["Nforecastyrs"]]),length(seasons)*length(F_cols)))
+  #Season
   Forecast_catch_setup[,2]<-rep(sort(rep(seasons,length(F_cols))),forecast[["Nforecastyrs"]])
+  #Fleet
   Forecast_catch_setup[,3]<-rep(sort(which(dat$fleetinfo$type!=3)),forecast[["Nforecastyrs"]]*(length(seasons)))
+  #Set catch/F to the initial recent geometric mean of F
   for(i in seasons){
     Forecast_catch_setup[Forecast_catch_setup[,2]==i,4]<-unlist(rep(F_by_Fleet_seas[F_by_Fleet_seas[,1]==i,-1],forecast[["Nforecastyrs"]]))
   }
+  #Set all basis to be F's to start will overwrite with fixed catches later if specified 
   Forecast_catch_setup[,5] <- 99
+  #Set all values as estimated/projected will change to 1's if fixed F's are specified
   Forecast_catch_setup[,6] <- 0
-  Forecast_catch_setup[,6] <- 0
-  Forecast_catch_setup<-as.data.frame(Forecast_catch_setup)
-  colnames(Forecast_catch_setup)<-c("Year","Seas","Fleet","Catch or F","Basis","Fixed","Rebuild")
-  #2) Set any fleets with 0 F to a small number so they can be increased if needed
-  #Forecast_catch_setup[,"Catch or F"] <- ifelse(Forecast_catch_setup[,"Catch or F"]==0, 0.00000001,Forecast_catch_setup[,"Catch or F"])
+  #Set all rebuild to 0 will add rebuild years as 1's if specified
+  Forecast_catch_setup[,7] <- 0
+  #Set the initial catch vector. This retains the initial values to simplify resetting 
+  Forecast_catch_setup[,12] <- Forecast_catch_setup[,8] <- Forecast_catch_setup[,4]
+  #Specify the effort reduction ratio if specifed otherwise leave as 1's 
+  ratio_fleets_setup <- 0
+  for(i in which(effort_reduction_ratio$Ratio<1)){
+    Forecast_catch_setup[which(Forecast_catch_setup[,3]==i),9] <- effort_reduction_ratio$Ratio[i]
+    #Also need to check that these fleets have retention functions specified and add 
+    #a time varying dev vector for the projection period on asymptotic retention.
+    if(is.element(ctl$size_selex_types[i,"Discard"],c(1,2,4))){
+      asym_ret_row <- which(row.names(ctl$size_selex_parms)==paste0("SizeSel_PRet_3_",dat$fleetnames[i],"(",i,")"))
+      Forecast_catch_setup[which(Forecast_catch_setup[,3]==i),11] <- ctl_new$size_selex_parms[asym_ret_row,"INIT"]
+      ctl$size_selex_parms[asym_ret_row,"dev_link"] <- 2
+      ctl$size_selex_parms[asym_ret_row,"dev_minyr"] <- dat$endyr+1
+      ctl$size_selex_parms[asym_ret_row,"dev_maxyr"] <- dat$endyr+forecast$Nforecastyrs
 
-  #3) Incorporate fixed values from the existing forecast file
+      if(!is.null(ctl$size_selex_parms_tv)){
+        if(length(ctl$size_selex_parms_tv[,1])>0){
+          rows_this_fleet <- grep(dat$fleetnames[i],row.names(ctl$size_selex_parms_tv),fixed=TRUE)
+          if(length(rows_this_fleet)>0){
+            ctl$size_selex_parms_tv <- ctl$size_selex_parms_tv[c(1:max(rows_this_fleet),max(rows_this_fleet),max(rows_this_fleet):length(row.names(ctl$size_selex_parms_tv))),]
+            row.names(ctl$size_selex_parms_tv)[max(rows_this_fleet)+1] <- paste0("SizeSel_PRet_3_",dat$fleetnames[i],"(",i,")_dev_se")
+            row.names(ctl$size_selex_parms_tv)[max(rows_this_fleet)+2] <- paste0("SizeSel_PRet_3_",dat$fleetnames[i],"(",i,")_dev_autocorr")
+            ctl$size_selex_parms_tv[max(rows_this_fleet)+1,] <- c(0,10,1,1,1,0,-1)
+            ctl$size_selex_parms_tv[max(rows_this_fleet)+2,] <- c(0,10,1,1,1,0,-1)
+            
+            last_par_before <- grep(row.names(ctl$size_selex_parms_tv)[max(rows_this_fleet)],row.names(parlist$S_parms),fixed=TRUE)
+            parlist$S_parms <- parlist$S_parms[c(1:last_par_before,last_par_before,last_par_before:length(parlist$S_parms[,1])),]
+            row.names(parlist$S_parms)[last_par_before+1] <- paste0("SizeSel_PRet_3_",dat$fleetnames[i],"(",i,")_dev_se")
+            row.names(parlist$S_parms)[last_par_before+2] <- paste0("SizeSel_PRet_3_",dat$fleetnames[i],"(",i,")_dev_autocorr")
+            parlist$S_parms[last_par_before+1,] <- c(1,1)
+            parlist$S_parms[last_par_before+2,] <- c(1,1)
+          }else{
+            rows_before<-grep(paste0("\\(",1:(i-1),"\\)",collapse = "|"),row.names(ctl$size_selex_parms_tv))
+            rows_after<-seq_along(row.names(ctl$size_selex_parms_tv))[-rows_before]
+            ctl$size_selex_parms_tv <- ctl$size_selex_parms_tv[c(rows_before,1,1,rows_after),]
+            row.names(ctl$size_selex_parms_tv)[max(c(rows_before,0))+1] <- paste0("SizeSel_PRet_3_",dat$fleetnames[i],"(",i,")_dev_se")
+            row.names(ctl$size_selex_parms_tv)[max(c(rows_before,0))+2] <- paste0("SizeSel_PRet_3_",dat$fleetnames[i],"(",i,")_dev_autocorr")
+            ctl$size_selex_parms_tv[max(c(rows_before,0))+1,] <- c(0,10,1,1,1,0,-1)
+            ctl$size_selex_parms_tv[max(c(rows_before,0))+2,] <- c(0,10,1,1,1,0,-1)
+            if(length(rows_before)==0){
+              last_par_before <- grep(row.names(ctl$size_selex_parms_tv)[(min(rows_after))],row.names(parlist$S_parms),fixed=TRUE)-1
+            }else{
+              last_par_before <- grep(row.names(ctl$size_selex_parms_tv)[max(rows_before)],row.names(parlist$S_parms),fixed=TRUE)
+            }
+            parlist$S_parms <- parlist$S_parms[c(1:last_par_before,last_par_before,last_par_before:length(parlist$S_parms[,1])),]
+            row.names(parlist$S_parms)[last_par_before+1] <- paste0("SizeSel_PRet_3_",dat$fleetnames[i],"(",i,")_dev_se")
+            row.names(parlist$S_parms)[last_par_before+2] <- paste0("SizeSel_PRet_3_",dat$fleetnames[i],"(",i,")_dev_autocorr")
+            parlist$S_parms[last_par_before+1,] <- c(1,1)
+            parlist$S_parms[last_par_before+2,] <- c(1,1)
+          }
+        }else{
+            ctl$size_selex_parms_tv <- ctl$size_selex_parms_tv[c(1,1),]
+            row.names(ctl$size_selex_parms_tv)[1] <- paste0("SizeSel_PRet_3_",dat$fleetnames[i],"(",i,")_dev_se")
+            row.names(ctl$size_selex_parms_tv)[2] <- paste0("SizeSel_PRet_3_",dat$fleetnames[i],"(",i,")_dev_autocorr")
+            ctl$size_selex_parms_tv[1,] <- c(0,10,1,1,1,0,-1)
+            ctl$size_selex_parms_tv[2,] <- c(0,10,1,1,1,0,-1)
+
+            parlist$S_parms <- parlist$S_parms[c(1:length(parlist$S_parms[,1]),length(parlist$S_parms[,1]),length(parlist$S_parms[,1])),]
+            row.names(parlist$S_parms)[length(parlist$S_parms[,1])+1] <- paste0("SizeSel_PRet_3_",dat$fleetnames[i],"(",i,")_dev_se")
+            row.names(parlist$S_parms)[length(parlist$S_parms[,1])+2] <- paste0("SizeSel_PRet_3_",dat$fleetnames[i],"(",i,")_dev_autocorr")
+            parlist$S_parms[length(parlist$S_parms[,1])+1,] <- c(1,1)
+            parlist$S_parms[length(parlist$S_parms[,1])+2,] <- c(1,1)
+        }
+      }else{
+        ctl$size_selex_parms_tv<-data.frame(LO=c(0,0),HI=c(10,10),INIT=c(1,1),PRIOR=c(1,1),
+                                            PR_SD=c(1,1),PR_type=c(0,0),PHASE=c(-1,-1))
+        row.names(ctl$size_selex_parms_tv)[1] <- paste0("SizeSel_PRet_3_",dat$fleetnames[i],"(",i,")_dev_se")
+        row.names(ctl$size_selex_parms_tv)[2] <- paste0("SizeSel_PRet_3_",dat$fleetnames[i],"(",i,")_dev_autocorr")
+
+        parlist$S_parms <- parlist$S_parms[c(1:length(parlist$S_parms[,1]),length(parlist$S_parms[,1]),length(parlist$S_parms[,1])),]
+            row.names(parlist$S_parms)[length(parlist$S_parms[,1])+1] <- paste0("SizeSel_PRet_3_",dat$fleetnames[i],"(",i,")_dev_se")
+            row.names(parlist$S_parms)[length(parlist$S_parms[,1])+2] <- paste0("SizeSel_PRet_3_",dat$fleetnames[i],"(",i,")_dev_autocorr")
+            parlist$S_parms[length(parlist$S_parms[,1])+1,] <- c(1,1)
+            parlist$S_parms[length(parlist$S_parms[,1])+2,] <- c(1,1)
+      }
+      
+      if(is.null(parlist$parm_devs)){
+        parlist[["parm_devs"]]<-list()
+        parlist[["parm_devs"]][[1]] <- matrix(data=c((dat$endyr+1):(dat$endyr+forecast$Nforecastyrs),rep(0,forecast$Nforecastyrs)),nrow=forecast$Nforecastyrs,ncol=2)
+        colnames(parlist[["parm_devs"]][[1]]) <- c("year", "dev")
+      }else{
+        if(length(parlist$parm_devs)>ratio_fleets_setup){
+        #TODO: add code to figure out ordering of parameter dev vectors
+        stop("Error: at least one parameter already has time varying deviations turned on the code 
+        does not yet support figuring out the order so ask for that to be added")
+        }else{
+          parlist[["parm_devs"]][[ratio_fleets_setup+1]] <- matrix(data=c((dat$endyr+1):(dat$endyr+forecast$Nforecastyrs),rep(0,forecast$Nforecastyrs)),nrow=forecast$Nforecastyrs,ncol=2)
+          colnames(parlist[["parm_devs"]][[ratio_fleets_setup+1]]) <- c("year", "dev")
+        }
+      }
+      ratio_fleets_setup <- ratio_fleets_setup + 1
+    }else{
+      #TODO: add code to turn on retention if it isn't already activated
+      stop("Error: no retention function set for fleet ",i," but you specified an
+      effort reduction ratio which needs an asymptotic retention")
+    }
+  }
+  #Covert to data frame and add column names
+  Forecast_catch_setup<-as.data.frame(Forecast_catch_setup)
+  colnames(Forecast_catch_setup)<-c("Year","Seas","Fleet","Catch or F","Basis","Fixed","Rebuild","Init_Catch_F","Effort_reduction_ratio","Multiplier","Base_ret_par","Last_Catch_F")
+  #Set any fleets with 0 F to a small number so they can be increased if needed
+  #Forecast_catch_setup[,"Catch or F"] <- ifelse(Forecast_catch_setup[,"Catch or F"]==0, 0.00000001,Forecast_catch_setup[,"Catch or F"])
+  
+  r4ss::SS_writectl(ctllist = ctl, outfile = start$ctlfile, version = 3.3, overwrite = TRUE, verbose = Verbose)
+
+  #Incorporate fixed values from the existing forecast file
   if(!is.null(forecast$ForeCatch)){
     for(i in seq_along(forecast$ForeCatch[,1])){
       match_row <- which(Forecast_catch_setup[,c("Year")]==forecast$ForeCatch[i,c("Year")] &
@@ -455,7 +579,8 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
                                   sep="\n")
     }
   }
-  #4) Fix constant F/Catch for fleets such as red tide, bycatch, or closed fleets
+  
+  #Fix constant F/Catch for fleets such as red tide, bycatch, or closed fleets  
   if(!is.null(Constant_fixed_catch)){
     for(i in seq_along(Constant_fixed_catch[,1])){
       if(is.null(Constant_fixed_catch[i,"Catch or F"])){
@@ -467,7 +592,8 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
       Forecast_catch_setup[Forecast_catch_setup[,"Fleet"]==Constant_fixed_catch[i,"Fleet"],"Fixed"] <- 1
     }
   }
-  #5) Update annual fixed F for fleets usually used for interim period catches
+
+  #Update annual fixed F for fleets usually used for interim period catches
   if(!is.null(Annual_fixed_catch)){
 
     for(i in seq_along(Annual_fixed_catch[,1])){
@@ -483,13 +609,16 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
       Forecast_catch_setup[match_row,"Fixed"] <- 1
     }
   }
-  #6) Create reference trackers for which years have fixed catch and which are adjusted
+
+  #Create reference trackers for which years have fixed catch and which are adjusted
   fixed_ref <- which(Forecast_catch_setup[,"Fixed"]==1)
   adjusted_F_OFL<-which(Forecast_catch_setup[,"Fixed"]==0)
   Fixed_catch_target<-Forecast_catch_setup[fixed_ref,1:5]
-  #7) Create forecast_F dataframe that will be used to update ForeCatch in forecast file
+  
+  #Create forecast_F dataframe that will be used to update ForeCatch in forecast file
   forecast_F <- Forecast_catch_setup[,1:5]
-  #6) Identify which years are subject to rebuilding plan F limits
+  
+  #Identify which years are subject to rebuilding plan F limits
   if(!is.null(Rebuild_yr)){
     #This reference identifies inputs subject to a rebuilding period F if any
     rebuild_ref <- which(Forecast_catch_setup[,1]<=Rebuild_yr)
@@ -578,9 +707,9 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
   forecast[["ForeCatch"]] <- forecast_F
   forecast[["FirstYear_for_caps_and_allocations"]] <- (dat[["endyr"]]+forecast[["Nforecastyrs"]]+1)
   forecast[["N_forecast_loops"]] <- 2
-
+  forecast[["Fcast_selex"]] <- 1
   last_forecast_F <- forecast[["ForeCatch"]]
-
+  r4ss::SS_writeforecast(mylist=forecast,overwrite = TRUE, verbose = Verbose)
   keepFitting <- TRUE
   loop <- 0
   subloop <- 0
@@ -596,6 +725,7 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
   Fmult2a <- Fmult2b <- 1
   First_run<-TRUE
   F_SS_adjust_year <- list(a=sort(rep(1:forecast[["Nforecastyrs"]],length(seasons)*length(F_cols))))
+  r4ss::SS_writepar_3.30(parlist = parlist, outfile = par_name, overwrite = TRUE, verbose = Verbose)
 
   if(!is.null(Const_Catch)){
     forecast$fcast_rec_option <- Const_catch_recruit_setting
@@ -750,7 +880,7 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
 
     if(is.element(loop,c(1,2,3,4,5,10,20,30,40,50,100,200,300,400,500,1000))){
       if(Messages == TRUE){
-        message(paste0("Running optimization loop ",loop))
+        message(paste0("Running optimization loop ",loop,", subloop ",subloop))
         if(loop>50){
           message("Optimization seems to be taking a while I would suggest checking the working directory report and/or forcast files to ensure this is converging")
         }
@@ -889,349 +1019,346 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
         Catch_Target[(forecast$Nforecastyrs-c((Catch_trunc-1):0))] <- 0
         forecast_F[(length(forecast_F[,1])-c((Catch_trunc*length(seasons)*length(F_cols)-1):0)),4] <- 0
       }
-      forecast_F[,4] <- forecast_F[,4]*0.5
+      Comb_Mult[Forecast_catch_setup[,"Fixed"]==0] <- 0.5
       loop <- loop - 1
     }else{
-
-    if(max(abs(achieved.report[,'F']-forecast_F[,"Catch or F"])[adjusted_F_OFL])>0.1){
-       if(fitting_Fixed_Catch==TRUE){
-         if(Catch_trunc >= (forecast$Nforecastyrs - 20)){
-           Catch_trunc <- Catch_trunc + 1
-         }else{
-           Catch_trunc <- Catch_trunc + 5
-         }
-         Catch_Target[(forecast$Nforecastyrs-c((Catch_trunc-1):0))] <- 0
-         forecast_F[(length(forecast_F[,1])-c((Catch_trunc*length(seasons)*length(F_cols)-1):0)),4] <- 0
-       }
-       expected_annual <- 1-exp(-aggregate(forecast_F[,"Catch or F"],by=F_SS_adjust_year,FUN=sum)$x)
-       achieved_annual <- 1-exp(-aggregate(achieved.report[,'F'],by=F_SS_adjust_year,FUN=sum)$x)
-       F_SS_adjust <- rep(achieved_annual/expected_annual,each=length(seasons)*length(F_cols))
-       F_maxed <- max(achieved.report[,'F'])
-    }else{
-      F_SS_adjust <- rep(1,length(forecast_F[,1]))
-    }
-    {
-    if(fitting_Benchmark==TRUE){
-
-      #Calculate the average F at equilibrium that all F's will be scaled to in order
-      #to achieve equal F in every year. As depletion approaches the target value this
-      #F will approach F(OFL).
-
-
-      F_report<-SPRfit$F_report
-      if(is.null(F_report)){
-        F_report<-SPRfit$F_std
-      }
-      FScale<-median(F_report[(length(F_report)-0.5*Years_projection):length(F_report)])
-      F_OFL<-FScale
-      if(!is.null(ABC_Fraction)){
-        F.ABC<-ABC_Fraction*FScale
+      
+      if(max(abs(achieved.report[,'F']-forecast_F[,"Catch or F"])[adjusted_F_OFL])>0.1){
+        if(fitting_Fixed_Catch==TRUE){
+          if(Catch_trunc >= (forecast$Nforecastyrs - 20)){
+            Catch_trunc <- Catch_trunc + 1
+          }else{
+            Catch_trunc <- Catch_trunc + 5
+          }
+          Catch_Target[(forecast$Nforecastyrs-c((Catch_trunc-1):0))] <- 0
+          forecast_F[(length(forecast_F[,1])-c((Catch_trunc*length(seasons)*length(F_cols)-1):0)),4] <- 0
+        }
+        expected_annual <- 1-exp(-aggregate(forecast_F[,"Catch or F"],by=F_SS_adjust_year,FUN=sum)$x)
+        achieved_annual <- 1-exp(-aggregate(achieved.report[,'F'],by=F_SS_adjust_year,FUN=sum)$x)
+        F_SS_adjust <- rep(achieved_annual/expected_annual,each=length(seasons)*length(F_cols))
+        F_maxed <- max(achieved.report[,'F'])
       }else{
-        F.ABC<-FScale
+        F_SS_adjust <- rep(1,length(forecast_F[,1]))
       }
-
-      Achieved.Catch.equil <- sum(TimeFit3[(length(TimeFit3[,1])-9):length(TimeFit3[,1]),Catch_cols3])/10
-      Achieved.SSBratio.equil <- median(TimeFit3$SpawnBio[(length(TimeFit3$SpawnBio)-9):length(TimeFit3$SpawnBio)])/Virgin_bio
-      Achieved.SPR.equil <- median(TimeFit3$SpawnBio[(length(TimeFit3$SpawnBio)-9):length(TimeFit3$SpawnBio)]/TimeFit3$Recruit_0[(length(TimeFit3$SpawnBio)-9):length(TimeFit3$SpawnBio)]) #median(SPRfit$SPR[(length(SPRfit$SPR)-9):length(SPRfit$SPR)])
-      Achieved.SSB.equil <- median(TimeFit3$SpawnBio[(length(TimeFit3$SpawnBio)-9):length(TimeFit3$SpawnBio)])
-      Achieved.Rec.equil <- median(TimeFit3$Recruit_0[(length(TimeFit3$Recruit_0)-9):length(TimeFit3$Recruit_0)])
-
-
-
-      if(n_groups>1){
-        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_Benchmark"]]<-list()
-        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_Equil_Benchmark"]]<-list()
-        for(i in 1:n_groups){
-          Achieved.Catch.group.equil <- sum(TimeFit3[(length(TimeFit3[,1])-9):length(TimeFit3[,1]),Catch_cols3[fleets_by_group[[i]]]])/10
-          projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_Equil_Benchmark"]][[i]]<-Achieved.Catch.group.equil
-
-          Achieved.Catch.group <- apply(TimeFit3[1:terminal_year,Catch_cols3[fleets_by_group[[i]]],drop=FALSE],1,sum)
-          projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_Benchmark"]][[i]]<-Achieved.Catch.group
+      if(fitting_Benchmark==TRUE){
+        #Calculate the average F at equilibrium that all F's will be scaled to in order
+        #to achieve equal F in every year. As depletion approaches the target value this 
+        #F will approach F(OFL).
+        
+        F_report<-SPRfit$F_report
+        if(is.null(F_report)){
+          F_report<-SPRfit$F_std
         }
-      }
-
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Catch_equil_Benchmark"]] <- Achieved.Catch.equil
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["F_equil_Benchmark"]] <- F_OFL
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Depletion_equil_Benchmark"]] <- Achieved.SSBratio.equil
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["SSB_equil_Benchmark"]] <- Achieved.SSB.equil
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["SPR_equil_Benchmark"]] <- Achieved.SPR.equil
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Recruitment_equil_Benchmark"]] <- Achieved.Rec.equil
-
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Forecatch_Benchmark"]] <- achieved.report
-
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Catch_Benchmark"]] <- Achieved.Catch
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["F_Benchmark"]] <- Achieved.F
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Depletion_Benchmark"]] <- Achieved.SSBratio
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["SSB_Benchmark"]] <- Achieved.SSB
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["SPR_Benchmark"]] <- Achieved.SPR
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Recruitment_Benchmark"]] <- Achieved.Rec
-      #Calculate depletion target adjustment scale depending on the specified target (SPR ratio, SSB ratio, or true MSY)
-      if(Forecast_target==1){
-        search_step<-0.00001
-        Target.Depletion <- forecast[["SPRtarget"]]
-        Depletion<-SPRfit$SPR
-
-        Achieved.Depletion <- median(Depletion[(length(Depletion)-29):length(Depletion)])
-
-        Achieved.Depletion <- min(Achieved.Depletion,max(Target.Depletion,0.9))
-
-        DepletionScale <- (1-Target.Depletion)/(1-Achieved.Depletion)
-
-        if(FScale==0){
-          if(DepletionScale<=1.0001){
-            DepletionScale<-1
-          }else{
-            FScale<-0.0001
-            F_OFL<-FScale
-            if(!is.null(ABC_Fraction)){
-              F.ABC<-ABC_Fraction*FScale
+        FScale<-median(F_report[(length(F_report)-0.5*Years_projection):length(F_report)])
+        F_OFL<-FScale
+        if(!is.null(ABC_Fraction)){
+          F.ABC<-ABC_Fraction*FScale
+        }else{
+          F.ABC<-FScale
+        }
+      
+        Achieved.Catch.equil <- sum(TimeFit3[(length(TimeFit3[,1])-9):length(TimeFit3[,1]),Catch_cols3])/10
+        Achieved.SSBratio.equil <- median(TimeFit3$SpawnBio[(length(TimeFit3$SpawnBio)-9):length(TimeFit3$SpawnBio)])/Virgin_bio
+        Achieved.SPR.equil <- median(TimeFit3$SpawnBio[(length(TimeFit3$SpawnBio)-9):length(TimeFit3$SpawnBio)]/TimeFit3$Recruit_0[(length(TimeFit3$SpawnBio)-9):length(TimeFit3$SpawnBio)]) #median(SPRfit$SPR[(length(SPRfit$SPR)-9):length(SPRfit$SPR)])
+        Achieved.SSB.equil <- median(TimeFit3$SpawnBio[(length(TimeFit3$SpawnBio)-9):length(TimeFit3$SpawnBio)])
+        Achieved.Rec.equil <- median(TimeFit3$Recruit_0[(length(TimeFit3$Recruit_0)-9):length(TimeFit3$Recruit_0)])
+        
+        
+        
+        if(n_groups>1){
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_Benchmark"]]<-list()
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_Equil_Benchmark"]]<-list()
+          for(i in 1:n_groups){
+            Achieved.Catch.group.equil <- sum(TimeFit3[(length(TimeFit3[,1])-9):length(TimeFit3[,1]),Catch_cols3[fleets_by_group[[i]]]])/10
+            projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_Equil_Benchmark"]][[i]]<-Achieved.Catch.group.equil
+            
+            Achieved.Catch.group <- apply(TimeFit3[1:terminal_year,Catch_cols3[fleets_by_group[[i]]],drop=FALSE],1,sum)
+            projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_Benchmark"]][[i]]<-Achieved.Catch.group
+          }
+        }
+        
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Catch_equil_Benchmark"]] <- Achieved.Catch.equil
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["F_equil_Benchmark"]] <- F_OFL
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Depletion_equil_Benchmark"]] <- Achieved.SSBratio.equil
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["SSB_equil_Benchmark"]] <- Achieved.SSB.equil
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["SPR_equil_Benchmark"]] <- Achieved.SPR.equil
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Recruitment_equil_Benchmark"]] <- Achieved.Rec.equil
+        
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Forecatch_Benchmark"]] <- achieved.report
+        
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Catch_Benchmark"]] <- Achieved.Catch
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["F_Benchmark"]] <- Achieved.F
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Depletion_Benchmark"]] <- Achieved.SSBratio
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["SSB_Benchmark"]] <- Achieved.SSB
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["SPR_Benchmark"]] <- Achieved.SPR
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Recruitment_Benchmark"]] <- Achieved.Rec
+        #Calculate depletion target adjustment scale depending on the specified target (SPR ratio, SSB ratio, or true MSY)   
+        if(Forecast_target==1){
+          search_step<-0.00001
+          Target.Depletion <- forecast[["SPRtarget"]]
+          Depletion<-SPRfit$SPR
+          
+          Achieved.Depletion <- median(Depletion[(length(Depletion)-29):length(Depletion)])
+          
+          Achieved.Depletion <- min(Achieved.Depletion,max(Target.Depletion,0.9))
+          
+          DepletionScale <- (1-Target.Depletion)/(1-Achieved.Depletion)
+          
+          if(FScale==0){
+            if(DepletionScale<=1.0001){
+              DepletionScale<-1
             }else{
-              F.ABC<-FScale
+              FScale<-0.0001
+              F_OFL<-FScale
+              if(!is.null(ABC_Fraction)){
+                F.ABC<-ABC_Fraction*FScale
+              }else{
+                F.ABC<-FScale
+              }
             }
-          }
-        }else{
-          DepletionScale <- (-log(1-((1-exp(-FScale))*DepletionScale))/FScale)
-        }
-
-        Depletion_R<-TimeFit3$SpawnBio/Virgin_bio
-        Target.Rebuild <- median(Depletion_R[(length(Depletion_R)-9):length(Depletion_R)])
-
-      }else if(Forecast_target==2){
-        Depletion <- TimeFit3$SpawnBio/Virgin_bio
-        Achieved.Depletion <- median(Depletion[(length(Depletion)-29):length(Depletion)])
-        Achieved.Depletion <- min(Achieved.Depletion,.9)
-        if(First_run == TRUE){
-          Target.Depletion <- forecast[["Btarget"]]
-          First_run <- FALSE
-        }
-        Target.Rebuild <- Target.Depletion
-        Achieved.SSB <- Achieved.Depletion
-        if(max(abs(1-Fmult3_raw))>Allocation.Threshold |
-		       max(abs(1-Fmult2_raw))>Annual.F.Threshold |
-		       max(abs(1-Fmult1_raw))>Depletion.Threshold){
-          loop<-loop-1
-          subloop<-subloop+1
-          if(F_max==TRUE){
-            Achieved.Catch <- sum(TimeFit3[(length(TimeFit3[,1])-9):length(TimeFit3[,1]),Catch_cols3])/
-			                  sum(TimeFit3[(length(TimeFit3[,1])-9):length(TimeFit3[,1]),"Recruit_0"])
           }else{
-            Achieved.Catch <- sum(TimeFit3[(length(TimeFit3[,1])-9):length(TimeFit3[,1]),Catch_cols3])/10
+            DepletionScale <- (-log(1-((1-exp(-FScale))*DepletionScale))/FScale)
           }
-          MSY.Fit[1,] <- c(Achieved.Catch,FScale,Achieved.Depletion,Target.Depletion)
-        }else{
-          subloop<-0
-          if(F_max==TRUE){
-            Achieved.Catch <- sum(TimeFit3[(length(TimeFit3[,1])-9):length(TimeFit3[,1]),Catch_cols3])/
-			                  sum(TimeFit3[(length(TimeFit3[,1])-9):length(TimeFit3[,1]),"Recruit_0"])
-          }else{
-            Achieved.Catch <- sum(TimeFit3[(length(TimeFit3[,1])-9):length(TimeFit3[,1]),Catch_cols3])/10
+          
+          Depletion_R<-TimeFit3$SpawnBio/Virgin_bio
+          Target.Rebuild <- median(Depletion_R[(length(Depletion_R)-9):length(Depletion_R)])
+          
+        }else if(Forecast_target==2){
+          Depletion <- TimeFit3$SpawnBio/Virgin_bio
+          Achieved.Depletion <- median(Depletion[(length(Depletion)-29):length(Depletion)])
+          Achieved.Depletion <- min(Achieved.Depletion,.9)
+          if(First_run == TRUE){
+            Target.Depletion <- forecast[["Btarget"]]
+            First_run <- FALSE
           }
-          MSY.Fit <- rbind(MSY.Fit[1,],MSY.Fit)
-          MSY.Fit[1,] <- c(Achieved.Catch,FScale,Achieved.Depletion,Target.Depletion)
-          if(loop>1){
-            if(Achieved.Catch<Last_Achieved_Catch){
-              search_step <- -0.3*search_step
+          Target.Rebuild <- Target.Depletion
+          Achieved.SSB <- Achieved.Depletion
+          if(max(abs(1-Fmult3_raw))>Allocation.Threshold | 
+            max(abs(1-Fmult2_raw))>Annual.F.Threshold | 
+            max(abs(1-Fmult1_raw))>Depletion.Threshold){
+            loop<-loop-1
+            subloop<-subloop+1
+            if(F_max==TRUE){
+              Achieved.Catch <- sum(TimeFit3[(length(TimeFit3[,1])-9):length(TimeFit3[,1]),Catch_cols3])/
+                          sum(TimeFit3[(length(TimeFit3[,1])-9):length(TimeFit3[,1]),"Recruit_0"])
+            }else{
+              Achieved.Catch <- sum(TimeFit3[(length(TimeFit3[,1])-9):length(TimeFit3[,1]),Catch_cols3])/10
             }
-
-            Target.Depletion <- Target.Depletion+search_step
-
-            min_diff <- which(abs(MSY.Fit[,4]-Target.Depletion)<0.001)
-            if(length(min_diff)>0){
-              Old.Catch <- MSY.Fit[min_diff[1],1]
-              if(Old.Catch<Achieved.Catch){
+            MSY.Fit[1,] <- c(Achieved.Catch,FScale,Achieved.Depletion,Target.Depletion)
+          }else{
+            subloop<-0
+            if(F_max==TRUE){
+              Achieved.Catch <- sum(TimeFit3[(length(TimeFit3[,1])-9):length(TimeFit3[,1]),Catch_cols3])/
+                          sum(TimeFit3[(length(TimeFit3[,1])-9):length(TimeFit3[,1]),"Recruit_0"])
+            }else{
+              Achieved.Catch <- sum(TimeFit3[(length(TimeFit3[,1])-9):length(TimeFit3[,1]),Catch_cols3])/10
+            }
+            MSY.Fit <- rbind(MSY.Fit[1,],MSY.Fit)
+            MSY.Fit[1,] <- c(Achieved.Catch,FScale,Achieved.Depletion,Target.Depletion)
+            if(loop>1){
+              if(Achieved.Catch<Last_Achieved_Catch){
                 search_step <- -0.3*search_step
               }
+            
               Target.Depletion <- Target.Depletion+search_step
-              Achieved.Catch <- Old.Catch
-            }
-          }else{
-            steps <- seq(0.1,0.9,0.1)
-            New.Target.Depletion <- steps[which(abs(steps-Target.Depletion)==min(abs(steps-Target.Depletion)))[1]]
-            if(New.Target.Depletion<Target.Depletion){
-              search_step <- -1*search_step
-            }
-            Target.Depletion <- New.Target.Depletion
-          }
-          Last_Achieved_Catch <- Achieved.Catch
-        }
-        DepletionScale <- (1-Target.Depletion)/(1-Achieved.Depletion)
-
-        if(FScale==0){
-          if(DepletionScale<=1.0001){
-            DepletionScale<-1
-          }else{
-            FScale<-0.0001
-            F_OFL<-FScale
-            if(!is.null(ABC_Fraction)){
-              F.ABC<-ABC_Fraction*FScale
+              
+              min_diff <- which(abs(MSY.Fit[,4]-Target.Depletion)<0.001)
+              if(length(min_diff)>0){
+                Old.Catch <- MSY.Fit[min_diff[1],1]
+                if(Old.Catch<Achieved.Catch){
+                  search_step <- -0.3*search_step
+                }
+                Target.Depletion <- Target.Depletion+search_step
+                Achieved.Catch <- Old.Catch
+              }
             }else{
-              F.ABC<-FScale
+              steps <- seq(0.1,0.9,0.1)
+              New.Target.Depletion <- steps[which(abs(steps-Target.Depletion)==min(abs(steps-Target.Depletion)))[1]]
+              if(New.Target.Depletion<Target.Depletion){
+                search_step <- -1*search_step
+              }
+              Target.Depletion <- New.Target.Depletion
             }
+            Last_Achieved_Catch <- Achieved.Catch
           }
-        }
-
-        if(Make_plots==TRUE){
-          try(
-            {
-              par(mar=c(4,3,3,2))
-              if(F_max==TRUE){
-                plot(x=TimeFit3[,"Yr"],y=apply(TimeFit3[,Catch_cols3,drop=FALSE],1,sum)/TimeFit3[,"Recruit_0"],
-      		       xlab="year",ylab="Total Yield Per Recruit",main = paste0(method," loop = ",loop,".",subloop))
-                plot(x=MSY.Fit[,"depletion"],y=MSY.Fit[,"catch"],xlim=c(0.9*min(MSY.Fit[,3:4]),1.1*max(MSY.Fit[,3:4])),
-      		       xlab="Esimated depletion",ylab="Total Yield Per Recruit",main = paste0(method," loop = ",loop,".",subloop))
-                lines(x=c(MSY.Fit[1,c(4,4)]),y=c(0,2*max(MSY.Fit[,"catch"])),col="dark red")
-                points(x=MSY.Fit[1,3],y=MSY.Fit[1,1],pch=16,col="dark blue")
+          DepletionScale <- (1-Target.Depletion)/(1-Achieved.Depletion)
+          
+          if(FScale==0){
+            if(DepletionScale<=1.0001){
+              DepletionScale<-1
+            }else{
+              FScale<-0.0001
+              F_OFL<-FScale
+              if(!is.null(ABC_Fraction)){
+                F.ABC<-ABC_Fraction*FScale
               }else{
-                plot(x=TimeFit3[,"Yr"],y=apply(TimeFit3[,Catch_cols3,drop=FALSE],1,sum),
-      		       xlab="year",ylab="Total Yield",main = paste0(method," loop = ",loop,".",subloop))
-                plot(x=MSY.Fit[,"depletion"],y=MSY.Fit[,"catch"],xlim=c(0.9*min(MSY.Fit[,3:4]),1.1*max(MSY.Fit[,3:4])),
-      		       xlab="Esimated depletion",ylab="Total Yield",main = paste0(method," loop = ",loop,".",subloop))
-                lines(x=c(MSY.Fit[1,c(4,4)]),y=c(0,2*max(MSY.Fit[,"catch"])),col="dark red")
-                points(x=MSY.Fit[1,3],y=MSY.Fit[1,1],pch=16,col="dark blue")
+                F.ABC<-FScale
               }
             }
-          )
-        }
-      }else if(Forecast_target==3){
-        search_step<-0.00001
-        Target.Depletion <- forecast[["Btarget"]]
-        Target.Rebuild <- forecast[["Btarget"]]
-        Depletion<-TimeFit3$SpawnBio/Virgin_bio
-        Achieved.Depletion <- median(Depletion[(length(Depletion)-29):length(Depletion)])
-        Achieved.Depletion <- min(Achieved.Depletion,max(0.9,Target.Depletion))
-        DepletionScale <- (1-Target.Depletion)/(1-Achieved.Depletion)
-
-        if(FScale==0){
-          if(DepletionScale<=1.0001){
-            DepletionScale<-1
-          }else{
-            FScale<-0.0001
-            F_OFL<-FScale
-            if(!is.null(ABC_Fraction)){
-              F.ABC<-ABC_Fraction*FScale
-            }else{
-              F.ABC<-FScale
-            }
           }
-        }else{
-          DepletionScale <- (-log(1-((1-exp(-FScale))*DepletionScale))/FScale)
+        
+          if(Make_plots==TRUE){
+            try(
+              {
+                par(mar=c(4,3,3,2))
+                if(F_max==TRUE){
+                  plot(x=TimeFit3[,"Yr"],y=apply(TimeFit3[,Catch_cols3,drop=FALSE],1,sum)/TimeFit3[,"Recruit_0"],
+                  xlab="year",ylab="Total Yield Per Recruit",main = paste0(method," loop = ",loop,".",subloop))
+                  plot(x=MSY.Fit[,"depletion"],y=MSY.Fit[,"catch"],xlim=c(0.9*min(MSY.Fit[,3:4]),1.1*max(MSY.Fit[,3:4])),
+                  xlab="Esimated depletion",ylab="Total Yield Per Recruit",main = paste0(method," loop = ",loop,".",subloop))
+                  lines(x=c(MSY.Fit[1,c(4,4)]),y=c(0,2*max(MSY.Fit[,"catch"])),col="dark red")
+                  points(x=MSY.Fit[1,3],y=MSY.Fit[1,1],pch=16,col="dark blue")
+                }else{
+                  plot(x=TimeFit3[,"Yr"],y=apply(TimeFit3[,Catch_cols3,drop=FALSE],1,sum),
+                  xlab="year",ylab="Total Yield",main = paste0(method," loop = ",loop,".",subloop))
+                  plot(x=MSY.Fit[,"depletion"],y=MSY.Fit[,"catch"],xlim=c(0.9*min(MSY.Fit[,3:4]),1.1*max(MSY.Fit[,3:4])),
+                  xlab="Esimated depletion",ylab="Total Yield",main = paste0(method," loop = ",loop,".",subloop))
+                  lines(x=c(MSY.Fit[1,c(4,4)]),y=c(0,2*max(MSY.Fit[,"catch"])),col="dark red")
+                  points(x=MSY.Fit[1,3],y=MSY.Fit[1,1],pch=16,col="dark blue")
+                }
+              }
+            )
+          }
+        }else if(Forecast_target==3){
+          search_step<-0.00001
+          Target.Depletion <- forecast[["Btarget"]]
+          Target.Rebuild <- forecast[["Btarget"]]
+          Depletion<-TimeFit3$SpawnBio/Virgin_bio
+          Achieved.Depletion <- median(Depletion[(length(Depletion)-29):length(Depletion)])
+          Achieved.Depletion <- min(Achieved.Depletion,max(0.9,Target.Depletion))
+          DepletionScale <- (1-Target.Depletion)/(1-Achieved.Depletion)
+          
+          if(FScale==0){
+            if(DepletionScale<=1.0001){
+              DepletionScale<-1
+            }else{
+              FScale<-0.0001
+              F_OFL<-FScale
+              if(!is.null(ABC_Fraction)){
+                F.ABC<-ABC_Fraction*FScale
+              }else{
+                F.ABC<-FScale
+              }
+            }
+          }else{
+            DepletionScale <- (-log(1-((1-exp(-FScale))*DepletionScale))/FScale)
+          }
+          
         }
-
-      }
-    }else if(fitting_OFL==TRUE){
-      search_step<-0.00001 #Set search step to small value so it doesn't trigger continued loops this value is only needed during the Benchmark MSY search
-      DepletionScale<-1 #Set depletion scale to 1 so it doesn't trigger continued loops now that Benchmark search is complete
-      FScale<-F_OFL #Set the F target to F.OFL for rescaling annual F values
-
-      if(n_groups>1){
-        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_OFL"]]<-list()
-        for(i in 1:n_groups){
-          Achieved.Catch.group <- apply(TimeFit3[1:terminal_year,Catch_cols3[fleets_by_group[[i]]],drop=FALSE],1,sum)
-          projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_OFL"]][[i]]<-Achieved.Catch.group
+      }else if(fitting_OFL==TRUE){
+        search_step<-0.00001 #Set search step to small value so it doesn't trigger continued loops this value is only needed during the Benchmark MSY search
+        DepletionScale<-1 #Set depletion scale to 1 so it doesn't trigger continued loops now that Benchmark search is complete
+        FScale<-F_OFL #Set the F target to F.OFL for rescaling annual F values
+        
+        if(n_groups>1){
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_OFL"]]<-list()
+          for(i in 1:n_groups){
+            Achieved.Catch.group <- apply(TimeFit3[1:terminal_year,Catch_cols3[fleets_by_group[[i]]],drop=FALSE],1,sum)
+            projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_OFL"]][[i]]<-Achieved.Catch.group
+          }
         }
-      }
-
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Catch_OFL"]] <- Achieved.Catch
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["F_OFL"]] <- Achieved.F
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Depletion_OFL"]] <- Achieved.SSBratio
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["SSB_OFL"]] <- Achieved.SSB
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["SPR_OFL"]] <- Achieved.SPR
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Recruitment_OFL"]] <- Achieved.Rec
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Forecatch_OFL"]] <- achieved.report
-
-    }else if(fitting_ABC==TRUE){
-      search_step<-0.00001 #Set search step to small value so it doesn't trigger continued loops this value is only needed during the Benchmark MSY search
-      DepletionScale<-1 #Set depletion scale to 1 so it doesn't trigger continued loops now that Benchmark search is complete
-      FScale<-F.ABC #Set the F target to F.ABC for rescaling annual F values
-
-      if(n_groups>1){
-        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_ABC"]]<-list()
-        for(i in 1:n_groups){
-          Achieved.Catch.group <- apply(TimeFit3[1:terminal_year,Catch_cols3[fleets_by_group[[i]]],drop=FALSE],1,sum)
-          projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_ABC"]][[i]]<-Achieved.Catch.group
+        
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Catch_OFL"]] <- Achieved.Catch
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["F_OFL"]] <- Achieved.F
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Depletion_OFL"]] <- Achieved.SSBratio
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["SSB_OFL"]] <- Achieved.SSB
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["SPR_OFL"]] <- Achieved.SPR
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Recruitment_OFL"]] <- Achieved.Rec
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Forecatch_OFL"]] <- achieved.report
+        
+      }else if(fitting_ABC==TRUE){
+        search_step<-0.00001 #Set search step to small value so it doesn't trigger continued loops this value is only needed during the Benchmark MSY search
+        DepletionScale<-1 #Set depletion scale to 1 so it doesn't trigger continued loops now that Benchmark search is complete
+        FScale<-F.ABC #Set the F target to F.ABC for rescaling annual F values
+        
+        if(n_groups>1){
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_ABC"]]<-list()
+          for(i in 1:n_groups){
+            Achieved.Catch.group <- apply(TimeFit3[1:terminal_year,Catch_cols3[fleets_by_group[[i]]],drop=FALSE],1,sum)
+            projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_ABC"]][[i]]<-Achieved.Catch.group
+          }
         }
-      }
-
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Catch_ABC"]] <- Achieved.Catch
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["F_ABC"]] <- Achieved.F
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Depletion_ABC"]] <- Achieved.SSBratio
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["SSB_ABC"]] <- Achieved.SSB
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["SPR_ABC"]] <- Achieved.SPR
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Recruitment_ABC"]] <- Achieved.Rec
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Forecatch_ABC"]] <- achieved.report
-    }else if(fitting_F0==TRUE){
-      search_step<-0.00001 #Set search step to small value so it doesn't trigger continued loops this value is only needed during the Benchmark MSY search
-      DepletionScale<-1 #Set depletion scale to 1 so it doesn't trigger continued loops now that Benchmark search is complete
-      FScale<-0 #Set the F target to 0 for rescaling annual F values
-
-      if(n_groups>1){
-        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_F0"]]<-list()
-        for(i in 1:n_groups){
-          Achieved.Catch.group <- apply(TimeFit3[1:terminal_year,Catch_cols3[fleets_by_group[[i]]],drop=FALSE],1,sum)
-          projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_F0"]][[i]]<-Achieved.Catch.group
+        
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Catch_ABC"]] <- Achieved.Catch
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["F_ABC"]] <- Achieved.F
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Depletion_ABC"]] <- Achieved.SSBratio
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["SSB_ABC"]] <- Achieved.SSB
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["SPR_ABC"]] <- Achieved.SPR
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Recruitment_ABC"]] <- Achieved.Rec
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Forecatch_ABC"]] <- achieved.report
+      }else if(fitting_F0==TRUE){
+        search_step<-0.00001 #Set search step to small value so it doesn't trigger continued loops this value is only needed during the Benchmark MSY search
+        DepletionScale<-1 #Set depletion scale to 1 so it doesn't trigger continued loops now that Benchmark search is complete
+        FScale<-0 #Set the F target to 0 for rescaling annual F values
+        
+        if(n_groups>1){
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_F0"]]<-list()
+          for(i in 1:n_groups){
+            Achieved.Catch.group <- apply(TimeFit3[1:terminal_year,Catch_cols3[fleets_by_group[[i]]],drop=FALSE],1,sum)
+            projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_F0"]][[i]]<-Achieved.Catch.group
+          }
         }
-      }
-
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Catch_F0"]] <- Achieved.Catch
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["F_F0"]] <- Achieved.F
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Depletion_F0"]] <- Achieved.SSBratio
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["SSB_F0"]] <- Achieved.SSB
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["SPR_F0"]] <- Achieved.SPR
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Recruitment_F0"]] <- Achieved.Rec
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Forecatch_F0"]] <- achieved.report
-    }else if(fitting_Rebuild==TRUE){
-      search_step<-0.00001 #Set search step to small value so it doesn't trigger continued loops this value is only needed during the Benchmark MSY search
-      DepletionScale<-1 #Set depletion scale to 1 so it doesn't trigger continued loops now that Benchmark search is complete
-      FScale<-F_OFL #Set the F target to F_OFL for rescaling annual F values in years after the rebuild period.
-      F_report<-SPRfit$F_report
-      if(is.null(F_report)){
-        F_report<-SPRfit$F_std
-      }
-      F_Rebuild_Scale<-F_report[SPRfit$Yr==Rebuild_yr]
-      Depletion<-TimeFit3$SpawnBio/Virgin_bio
-      Achieved.Rebuild <- mean(Depletion[SPRfit$Yr==Rebuild_yr])
-
-      Rebuild.Scale <- (1-Target.Rebuild)/(1-Achieved.Rebuild)
-      Rebuild.Ratio <- Rebuild.Scale
-      Rebuild.Scale <- min(-log(1-((1-exp(-F_Rebuild_Scale))*Rebuild.Scale)),FScale)
-      if(Rebuild.Scale < 0.00001 & Rebuild.Ratio < 1){
-        Rebuild.Scale <- 0
-      }
-      if(n_groups>1){
-        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_Rebuild"]]<-list()
-        for(i in 1:n_groups){
-          Achieved.Catch.group <- apply(TimeFit3[1:terminal_year,Catch_cols3[fleets_by_group[[i]]],drop=FALSE],1,sum)
-          projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_Rebuild"]][[i]]<-Achieved.Catch.group
+        
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Catch_F0"]] <- Achieved.Catch
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["F_F0"]] <- Achieved.F
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Depletion_F0"]] <- Achieved.SSBratio
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["SSB_F0"]] <- Achieved.SSB
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["SPR_F0"]] <- Achieved.SPR
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Recruitment_F0"]] <- Achieved.Rec
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Forecatch_F0"]] <- achieved.report
+      }else if(fitting_Rebuild==TRUE){
+        search_step<-0.00001 #Set search step to small value so it doesn't trigger continued loops this value is only needed during the Benchmark MSY search
+        DepletionScale<-1 #Set depletion scale to 1 so it doesn't trigger continued loops now that Benchmark search is complete
+        FScale<-F_OFL #Set the F target to F_OFL for rescaling annual F values in years after the rebuild period.
+        F_report<-SPRfit$F_report
+        if(is.null(F_report)){
+          F_report<-SPRfit$F_std
         }
+        F_Rebuild_Scale<-F_report[SPRfit$Yr==Rebuild_yr]
+        Depletion<-TimeFit3$SpawnBio/Virgin_bio
+        Achieved.Rebuild <- mean(Depletion[SPRfit$Yr==Rebuild_yr])
+        
+        Rebuild.Scale <- (1-Target.Rebuild)/(1-Achieved.Rebuild)
+        Rebuild.Ratio <- Rebuild.Scale
+        Rebuild.Scale <- min(-log(1-((1-exp(-F_Rebuild_Scale))*Rebuild.Scale)),FScale)
+        if(Rebuild.Scale < 0.00001 & Rebuild.Ratio < 1){
+          Rebuild.Scale <- 0
+        }
+        if(n_groups>1){
+          projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_Rebuild"]]<-list()
+          for(i in 1:n_groups){
+            Achieved.Catch.group <- apply(TimeFit3[1:terminal_year,Catch_cols3[fleets_by_group[[i]]],drop=FALSE],1,sum)
+            projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_Rebuild"]][[i]]<-Achieved.Catch.group
+          }
+        }
+        
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Catch_Rebuild"]] <- Achieved.Catch
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["F_Rebuild"]] <- Achieved.F
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Depletion_Rebuild"]] <- Achieved.SSBratio
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["SSB_Rebuild"]] <- Achieved.SSB
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["SPR_Rebuild"]] <- Achieved.SPR
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Recruitment_Rebuild"]] <- Achieved.Rec
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][["Forecatch_Rebuild"]] <- achieved.report
+      }else if (fitting_Fixed_Catch==TRUE){
+        
+        search_step<-0.00001 #Set search step to small value so it doesn't trigger continued loops this value is only needed during the Benchmark MSY search
+        DepletionScale<-1 #Set depletion scale to 1 so it doesn't trigger continued loops now that Benchmark search is complete
+        FScale<-0 #Set the F target to F_OFL for rescaling annual F values in years after the rebuild period.
+        
+        Fmult4 <- rep(Catch_Target/Achieved.Catch.All,each=(length(seasons)*length(F_cols)))
+        
+        Fmult4 <- ifelse(forecast_F[,4]>=max_F_limit,ifelse(Fmult4>1,1,Fmult4),Fmult4)
+        
+        Fmult4[is.na(Fmult4)] <- 1
+        
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("Catch_FixedCatch_",CC_loop)]] <- Achieved.Catch
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("F_FixedCatch_",CC_loop)]] <- Achieved.F
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("Depletion_FixedCatch_",CC_loop)]] <- Achieved.SSBratio
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("SSB_FixedCatch_",CC_loop)]] <- Achieved.SSB
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("SPR_FixedCatch_",CC_loop)]] <- Achieved.SPR
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("Recruitment_FixedCatch_",CC_loop)]] <- Achieved.Rec
+        projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("Forecatch_FixedCatch_",CC_loop)]] <- achieved.report
       }
-
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Catch_Rebuild"]] <- Achieved.Catch
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["F_Rebuild"]] <- Achieved.F
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Depletion_Rebuild"]] <- Achieved.SSBratio
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["SSB_Rebuild"]] <- Achieved.SSB
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["SPR_Rebuild"]] <- Achieved.SPR
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Recruitment_Rebuild"]] <- Achieved.Rec
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][["Forecatch_Rebuild"]] <- achieved.report
-    }else if (fitting_Fixed_Catch==TRUE){
-
-      search_step<-0.00001 #Set search step to small value so it doesn't trigger continued loops this value is only needed during the Benchmark MSY search
-      DepletionScale<-1 #Set depletion scale to 1 so it doesn't trigger continued loops now that Benchmark search is complete
-      FScale<-0 #Set the F target to F_OFL for rescaling annual F values in years after the rebuild period.
-
-      Fmult4 <- rep(Catch_Target/Achieved.Catch.All,each=(length(seasons)*length(F_cols)))
-
-      Fmult4 <- ifelse(forecast_F[,4]>=max_F_limit,ifelse(Fmult4>1,1,Fmult4),Fmult4)
-
-      Fmult4[is.na(Fmult4)] <- 1
-
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("Catch_FixedCatch_",CC_loop)]] <- Achieved.Catch
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("F_FixedCatch_",CC_loop)]] <- Achieved.F
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("Depletion_FixedCatch_",CC_loop)]] <- Achieved.SSBratio
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("SSB_FixedCatch_",CC_loop)]] <- Achieved.SSB
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("SPR_FixedCatch_",CC_loop)]] <- Achieved.SPR
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("Recruitment_FixedCatch_",CC_loop)]] <- Achieved.Rec
-      projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("Forecatch_FixedCatch_",CC_loop)]] <- achieved.report
-    }
       if(is.infinite(DepletionScale)){
         DepletionScale <- 1
       }
@@ -1247,350 +1374,373 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
       if(DepletionScale <= 0){
         DepletionScale <- 1
       }
+      Fmult1_raw <- rep(DepletionScale,forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols))
       if(DepletionScale <= 0.5){
         DepletionScale <- 0.5
       }
       if(DepletionScale >= 2){
         DepletionScale <- 2
-      }
-    #Fmult2 calculations define the multiplier for adjusting annual F values
-    #Zero catch years are identified first to prevent divide by zero errors in the scaling and
-    #to tell the search algorithm that the target has been achieved
+      }  
+      #Fmult2 calculations define the multiplier for adjusting annual F values
+      #Zero catch years are identified first to prevent divide by zero errors in the scaling and
+      #to tell the search algorithm that the target has been achieved
 
-    if(is.null(SPRfit$F_report)){
-      zero_catch <- which(SPRfit$F_std[sort(rep(seq_along(SPRfit$F_std),length(seasons)*length(F_cols)))]==0)
-    }else{
-      zero_catch <- which(SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))]==0)
-    }
-    if(fitting_Fixed_Catch==FALSE){
-      if(length(zero_catch)>0){
-        if(FScale==0){
-          Fmult2[zero_catch] <- 1
-          Fmult2[-zero_catch] <- 0
-        }else{
-          Fmult2[zero_catch] <- 2
-          if(is.null(SPRfit$F_report)){
-            temp_F <- SPRfit$F_std[sort(rep(seq_along(SPRfit$F_std),length(seasons)*length(F_cols)))][-zero_catch]
+      if(is.null(SPRfit$F_report)){
+        zero_catch <- which(SPRfit$F_std[sort(rep(seq_along(SPRfit$F_std),length(seasons)*length(F_cols)))]==0)
+      }else{
+        zero_catch <- which(SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))]==0)
+      }
+      if(fitting_Fixed_Catch==FALSE){
+        if(length(zero_catch)>0){
+          if(FScale==0){
+            Fmult2[zero_catch] <- 1
+            Fmult2[-zero_catch] <- 0
           }else{
-            temp_F <- SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))][-zero_catch]
+            Fmult2[zero_catch] <- 2
+            if(is.null(SPRfit$F_report)){
+              temp_F <- SPRfit$F_std[sort(rep(seq_along(SPRfit$F_std),length(seasons)*length(F_cols)))][-zero_catch]
+            }else{
+              temp_F <- SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))][-zero_catch]
+            }
+            temp_F[temp_F>max_F_limit] <- max_F_limit
+            temp_F[temp_F<(min(0.001,FScale))] <- min(0.001,FScale)
+            Fmult2[-zero_catch] <- FScale/temp_F
+          }
+        }else if(FScale==0){
+          Fmult2[] <- 0
+        }else{
+          if(is.null(SPRfit$F_report)){
+            temp_F <- SPRfit$F_std[sort(rep(seq_along(SPRfit$F_std),length(seasons)*length(F_cols)))]
+          }else{
+            temp_F <- SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))]
           }
           temp_F[temp_F>max_F_limit] <- max_F_limit
           temp_F[temp_F<(min(0.001,FScale))] <- min(0.001,FScale)
-          Fmult2[-zero_catch] <- FScale/temp_F
+          Fmult2 <- FScale/temp_F
         }
-      }else if(FScale==0){
-        Fmult2[] <- 0
       }else{
+        Fmult2 <- rep(1,forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols))
+      }
+    
+      #If in a rebuild search phase the rebuild years are now adjusted independently of the later F_OFL years
+      if(fitting_Rebuild==TRUE){
         if(is.null(SPRfit$F_report)){
-          temp_F <- SPRfit$F_std[sort(rep(seq_along(SPRfit$F_std),length(seasons)*length(F_cols)))]
+          temp_F <- SPRfit$F_std[sort(rep(seq_along(SPRfit$F_std),length(seasons)*length(F_cols)))][adjusted_Rebuild_F_Rebuild]
         }else{
-          temp_F <- SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))]
+          temp_F <- SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))][adjusted_Rebuild_F_Rebuild]
         }
-        temp_F[temp_F>max_F_limit] <- max_F_limit
-        temp_F[temp_F<(min(0.001,FScale))] <- min(0.001,FScale)
-        Fmult2 <- FScale/temp_F
-      }
-    }else{
-      Fmult2 <- rep(1,forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols))
-    }
-
-    #If in a rebuild search phase the rebuild years are now adjusted independently of the later F_OFL years
-    if(fitting_Rebuild==TRUE){
-      if(is.null(SPRfit$F_report)){
-        temp_F <- SPRfit$F_std[sort(rep(seq_along(SPRfit$F_std),length(seasons)*length(F_cols)))][adjusted_Rebuild_F_Rebuild]
-      }else{
-        temp_F <- SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))][adjusted_Rebuild_F_Rebuild]
-      }
-      zero_rebuild <- which(temp_F==0)
-      if(length(zero_rebuild)>0){
-        if(Rebuild.Scale==0){
-          Fmult2[adjusted_Rebuild_F_Rebuild[zero_rebuild]] <- 1
-          Fmult2[adjusted_Rebuild_F_Rebuild[-zero_rebuild]] <- 0
+        zero_rebuild <- which(temp_F==0)
+        if(length(zero_rebuild)>0){
+          if(Rebuild.Scale==0){
+            Fmult2[adjusted_Rebuild_F_Rebuild[zero_rebuild]] <- 1
+            Fmult2[adjusted_Rebuild_F_Rebuild[-zero_rebuild]] <- 0
+          }else{
+            Fmult2[adjusted_Rebuild_F_Rebuild[zero_rebuild]] <- 2
+            temp_F[temp_F>max_F_limit] <- max_F_limit
+            temp_F[temp_F<(min(0.001,Rebuild.Scale))] <- min(0.001,Rebuild.Scale)
+            Fmult2[adjusted_Rebuild_F_Rebuild[-zero_rebuild]] <- Rebuild.Scale/temp_F[-zero_rebuild]
+          }
+        }else if(Rebuild.Scale==0){
+          Fmult2[adjusted_Rebuild_F_Rebuild] <- 0
         }else{
-          Fmult2[adjusted_Rebuild_F_Rebuild[zero_rebuild]] <- 2
           temp_F[temp_F>max_F_limit] <- max_F_limit
           temp_F[temp_F<(min(0.001,Rebuild.Scale))] <- min(0.001,Rebuild.Scale)
-          Fmult2[adjusted_Rebuild_F_Rebuild[-zero_rebuild]] <- Rebuild.Scale/temp_F[-zero_rebuild]
+          Fmult2[adjusted_Rebuild_F_Rebuild] <- Rebuild.Scale/temp_F
         }
-      }else if(Rebuild.Scale==0){
-        Fmult2[adjusted_Rebuild_F_Rebuild] <- 0
+      }
+      Fmult2[which(is.infinite(Fmult2))] <- 1
+      Fmult2[which(is.nan(Fmult2))] <- 1
+      Fmult2[which(is.na(Fmult2))] <- 1
+      Fmult2[which(Fmult2<=0)] <- 1
+      Fmult2[which(Fmult2>=2)] <- 2
+      Fmult2[which(Fmult2<=0.5)] <- 0.5
+      Fmult2_raw <- Fmult2
+      #Here a range of adjustments are made to the F step sizes based on the expected vs achieved change in F from
+      #the previous step. i.e. if the last change only had half the impact expected on F then the next step will
+      #be modified to make the next change in F twice as large as the raw change in F estimated.
+      
+      if(fitting_Fixed_Catch==FALSE){
+        if((loop>1 |  subloop>2) & DepletionScale>0 & DepletionScale!=1 & fitting_Benchmark==TRUE & (Forecast_target!=2 | subloop>2)){
+          F_adjust1 <- (4*F_adjust1 + global_adjuster)/5
+          F_adjust1 <- F_adjust1*(Last_Mult1-1)/(Last_Mult1-DepletionScale)
+          if(is.infinite(F_adjust1)){
+            F_adjust1 <- global_adjuster
+          }
+          if(is.na(F_adjust1)){
+            F_adjust1 <- global_adjuster
+          }
+          if(is.nan(F_adjust1)){
+            F_adjust1 <- global_adjuster
+          }
+          if(F_adjust1 <= 0){
+            F_adjust1 <- 0.5
+          }
+          if(F_adjust1 <= 0.5){
+            F_adjust1 <- 0.5
+          }
+          if(F_adjust1 >= 2){
+            F_adjust1 <- 2
+          }
+          if((DepletionScale-1)*(Last_Mult1-1) <= 0){
+            F_adjust1_2 <- 0.8*F_adjust1_2
+          }else{
+            F_adjust1_2 <- (4*F_adjust1_2 + global_adjuster)/5
+          }
+          F_adjust1 <- F_adjust1 * F_adjust1_2
+          if(F_adjust1>0){
+            DepletionScale <- ((DepletionScale-1)*F_adjust1+1)
+          }
+          if(is.infinite(DepletionScale)){
+            DepletionScale <- 1
+          }
+          if(is.na(DepletionScale)){
+            DepletionScale <- 1
+          }
+          if(is.nan(DepletionScale)){
+            DepletionScale <- 1
+          }
+          if(DepletionScale <= 0){
+            DepletionScale <- 1
+          }
+          if(DepletionScale <= 0.5){
+            DepletionScale <- 0.5
+          }
+          if(DepletionScale >= 2){
+            DepletionScale <- 2
+          }  
+        }
+        if(loop>1 & (fitting_Benchmark==TRUE | fitting_OFL==TRUE | fitting_ABC==TRUE)){
+          F_adjust2 <- (4*F_adjust2 + global_adjuster)/5
+          F_adjust2 <- F_adjust2*(Last_Mult2-1)/(Last_Mult2-F_SS_adjust*Fmult2)
+          
+          F_adjust2[which(is.infinite(F_adjust2))] <- global_adjuster
+          F_adjust2[which(is.nan(F_adjust2))] <- global_adjuster
+          F_adjust2[which(is.na(F_adjust2))] <- global_adjuster
+          F_adjust2[which(F_adjust2<=0)] <- min(0.5,global_adjuster)
+          F_adjust2[which(F_adjust2>=2)] <- 2
+          #F_adjust2[which(F_adjust2<=0.5)] <- 0.5
+          F_adjust2_2[which((Fmult2-1)*(Last_Mult2-1)<=0)] <- 0.8*F_adjust2_2[which((Fmult2-1)*(Last_Mult2-1)<=0)]
+          #F_adjust2_2[which((Fmult2-1)*(Last_Mult2-1)>0)] <- 
+          #  (4*F_adjust2_2[which((Fmult2-1)*(Last_Mult2-1)>0)]+global_adjuster)/5
+          F_adjust2_2[which(abs(F_SS_adjust-1)>=0.1)] <- 0.8*F_adjust2_2[which(abs(F_SS_adjust-1)>=0.1)]
+          
+          Fmult2 <- ((Fmult2-1)*F_adjust2*F_adjust2_2+1)
+          
+          Fmult2[which(is.infinite(Fmult2))] <- 1
+          Fmult2[which(is.nan(Fmult2))] <- 1
+          Fmult2[which(is.na(Fmult2))] <- 1
+          Fmult2[which(Fmult2<=0)] <- 1
+          Fmult2[which(Fmult2>=2)] <- 2
+          Fmult2[which(Fmult2<=0.5)] <- 0.5
+        }
+        if(loop>1 & min(Fmult2)>0 & fitting_Rebuild==TRUE & median(Fmult2[adjusted_Rebuild_F_Rebuild])!=1 & median(Fmult2[adjusted_OFL_F_Rebuild])!=1){
+          if(exists("F_adjust2a")){
+            F_adjust2a <- (F_adjust2a + global_adjuster)/2
+          }else{
+            F_adjust2a <- global_adjuster
+          }
+          if(exists("F_adjust2b")){
+            F_adjust2b <- (F_adjust2b + global_adjuster)/2
+          }else{
+            F_adjust2b <- global_adjuster
+          }
+          F_adjust2a <- F_adjust2a*(Last_Mult2a-1)/(Last_Mult2a-median(Fmult2[adjusted_Rebuild_F_Rebuild]))
+          F_adjust2b <- F_adjust2b*(Last_Mult2b-1)/(Last_Mult2b-median(Fmult2[adjusted_OFL_F_Rebuild]))
+          
+          if(!is.na(F_adjust2a)){
+            if(is.infinite(F_adjust2a)){
+              F_adjust2a <- global_adjuster
+            }else if(F_adjust2a <= 0){
+              F_adjust2a <- 0.5
+            }
+            if(is.infinite(F_adjust2a)){
+              F_adjust2a <- global_adjuster
+            }else if(F_adjust2a > 0){
+              Fmult2a <- Fmult2[adjusted_Rebuild_F_Rebuild]
+              if(length(Fmult2a[Fmult2a<1])>0){
+                Fmult2a[Fmult2a<1] <- exp(log(Fmult2a[Fmult2a<1])*F_adjust2a)
+              }
+              if(length(Fmult2a[Fmult2a>1])>0){
+                Fmult2a[Fmult2a>1] <- ((Fmult2a[Fmult2a>1]-1)*F_adjust2a+1)
+              }
+              Fmult2[adjusted_Rebuild_F_Rebuild] <- Fmult2a
+            }else{
+              F_adjust2a <- global_adjuster
+            }
+          }else{
+            F_adjust2a <- global_adjuster
+          }
+          if(!is.na(F_adjust2b)){
+            if(is.infinite(F_adjust2b)){
+              F_adjust2b <- global_adjuster
+            }else if(F_adjust2b <= 0){
+              F_adjust2b <- 0.5
+            }
+            if(is.infinite(F_adjust2b)){
+              F_adjust2b <- global_adjuster
+            }else if(F_adjust2b > 0){
+              Fmult2b <- Fmult2[adjusted_OFL_F_Rebuild]
+              if(length(Fmult2b[Fmult2b<1])>0){
+                Fmult2b[Fmult2b<1] <- exp(log(Fmult2b[Fmult2b<1])*F_adjust2b)
+              }
+              if(length(Fmult2b[Fmult2b>1])>0){
+                Fmult2b[Fmult2b>1] <- ((Fmult2b[Fmult2b>1]-1)*F_adjust2b+1)
+              }
+              Fmult2[adjusted_OFL_F_Rebuild] <- Fmult2b
+            }else{
+              F_adjust2b <- global_adjuster
+            }
+          }else{
+            F_adjust2b <- global_adjuster
+          }
+        }
+      }
+
+      Fmult1 <- rep(DepletionScale,forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols))
+      #Here the achieved catch fractions by fishing sector and year are calculated and compared relative 
+      #to the target allocations. An adjustment multiplier is then computed to adjust fleet Fs closer to a
+      #value expected to achieve the target allocations.
+      if(FScale > 0){               
+        if(n_groups>0){
+          Catch_temp <- TimeFit3[,Catch_cols3]
+          Catch_tot <- apply(Catch_temp[,unlist(fleets_by_group),drop=FALSE],1,sum)
+          for(i in 1:n_groups){
+            sort.mat <- matrix(NA, nrow = forecast[["Nforecastyrs"]]*length(seasons)*length(which(groups==i)), ncol = 2)
+            sort.mat[,1] <- rep(1:forecast[["Nforecastyrs"]],length(seasons)*length(which(groups==i)))
+            sort.mat[,2] <- rep(apply(Catch_temp[,fleets_by_group[[i]],drop=FALSE],1,sum)/Catch_tot,length(seasons)*length(which(groups==i)))
+            sort.mat <- sort.mat[order(sort.mat[,1]),]
+            Allocations[Allocations[,4]==i,6] <- sort.mat[,2]
+          }
+        }
+        Fmult3 <- (0.5*(Allocations[,5]/Allocations[,6]-1)+1)
+        Fmult3[which(Allocations[,7]==0)] <- 1
       }else{
-        temp_F[temp_F>max_F_limit] <- max_F_limit
-        temp_F[temp_F<(min(0.001,Rebuild.Scale))] <- min(0.001,Rebuild.Scale)
-        Fmult2[adjusted_Rebuild_F_Rebuild] <- Rebuild.Scale/temp_F
+        Fmult3 <- rep(1,forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols))
       }
-    }
-    Fmult2[which(is.infinite(Fmult2))] <- 1
-    Fmult2[which(is.nan(Fmult2))] <- 1
-    Fmult2[which(is.na(Fmult2))] <- 1
-    Fmult2[which(Fmult2<=0)] <- 1
-    Fmult2[which(Fmult2>=2)] <- 2
-    Fmult2[which(Fmult2<=0.5)] <- 0.5
-    Fmult2_raw <- Fmult2
-    #Here a range of adjustments are made to the F step sizes based on the expected vs achieved change in F from
-    #the previous step. i.e. if the last change only had half the impact expected on F then the next step will
-    #be modified to make the next change in F twice as large as the raw change in F estimated.
-
-    if(fitting_Fixed_Catch==FALSE){
-      if((loop>1 |  subloop>2) & DepletionScale>0 & DepletionScale!=1 & fitting_Benchmark==TRUE & (Forecast_target!=2 | subloop>2)){
-        F_adjust1 <- (4*F_adjust1 + global_adjuster)/5
-        F_adjust1 <- F_adjust1*(Last_Mult1-1)/(Last_Mult1-DepletionScale)
-        if(is.infinite(F_adjust1)){
-          F_adjust1 <- global_adjuster
-        }
-        if(is.na(F_adjust1)){
-          F_adjust1 <- global_adjuster
-        }
-        if(is.nan(F_adjust1)){
-          F_adjust1 <- global_adjuster
-        }
-        if(F_adjust1 <= 0){
-          F_adjust1 <- 0.5
-        }
-        if(F_adjust1 <= 0.5){
-          F_adjust1 <- 0.5
-        }
-        if(F_adjust1 >= 2){
-          F_adjust1 <- 2
-        }
-        if((DepletionScale-1)*(Last_Mult1-1) <= 0){
-          F_adjust1_2 <- 0.8*F_adjust1_2
-        }else{
-          F_adjust1_2 <- (4*F_adjust1_2 + global_adjuster)/5
-        }
-        F_adjust1 <- F_adjust1 * F_adjust1_2
-        if(F_adjust1>0){
-          DepletionScale <- ((DepletionScale-1)*F_adjust1+1)
-        }
-        if(is.infinite(DepletionScale)){
-          DepletionScale <- 1
-        }
-        if(is.na(DepletionScale)){
-          DepletionScale <- 1
-        }
-        if(is.nan(DepletionScale)){
-          DepletionScale <- 1
-        }
-        if(DepletionScale <= 0){
-          DepletionScale <- 1
-        }
-        if(DepletionScale <= 0.5){
-          DepletionScale <- 0.5
-        }
-        if(DepletionScale >= 2){
-          DepletionScale <- 2
-        }
-      }
-      if(loop>1 & (fitting_Benchmark==TRUE | fitting_OFL==TRUE | fitting_ABC==TRUE)){
-        F_adjust2 <- (4*F_adjust2 + global_adjuster)/5
-        F_adjust2 <- F_adjust2*(Last_Mult2-1)/(Last_Mult2-F_SS_adjust*Fmult2)
-
-        F_adjust2[which(is.infinite(F_adjust2))] <- global_adjuster
-        F_adjust2[which(is.nan(F_adjust2))] <- global_adjuster
-        F_adjust2[which(is.na(F_adjust2))] <- global_adjuster
-        F_adjust2[which(F_adjust2<=0)] <- min(0.5,global_adjuster)
-        F_adjust2[which(F_adjust2>=2)] <- 2
-        #F_adjust2[which(F_adjust2<=0.5)] <- 0.5
-        F_adjust2_2[which((Fmult2-1)*(Last_Mult2-1)<=0)] <- 0.8*F_adjust2_2[which((Fmult2-1)*(Last_Mult2-1)<=0)]
-        #F_adjust2_2[which((Fmult2-1)*(Last_Mult2-1)>0)] <-
-        #  (4*F_adjust2_2[which((Fmult2-1)*(Last_Mult2-1)>0)]+global_adjuster)/5
-        F_adjust2_2[which(abs(F_SS_adjust-1)>=0.1)] <- 0.8*F_adjust2_2[which(abs(F_SS_adjust-1)>=0.1)]
-
-        Fmult2 <- ((Fmult2-1)*F_adjust2*F_adjust2_2+1)
-
-        Fmult2[which(is.infinite(Fmult2))] <- 1
-        Fmult2[which(is.nan(Fmult2))] <- 1
-        Fmult2[which(is.na(Fmult2))] <- 1
-        Fmult2[which(Fmult2<=0)] <- 1
-        Fmult2[which(Fmult2>=2)] <- 2
-        Fmult2[which(Fmult2<=0.5)] <- 0.5
-      }
-      if(loop>1 & min(Fmult2)>0 & fitting_Rebuild==TRUE & median(Fmult2[adjusted_Rebuild_F_Rebuild])!=1 & median(Fmult2[adjusted_OFL_F_Rebuild])!=1){
-        if(exists("F_adjust2a")){
-          F_adjust2a <- (F_adjust2a + global_adjuster)/2
-        }else{
-          F_adjust2a <- global_adjuster
-        }
-        if(exists("F_adjust2b")){
-          F_adjust2b <- (F_adjust2b + global_adjuster)/2
-        }else{
-          F_adjust2b <- global_adjuster
-        }
-        F_adjust2a <- F_adjust2a*(Last_Mult2a-1)/(Last_Mult2a-median(Fmult2[adjusted_Rebuild_F_Rebuild]))
-        F_adjust2b <- F_adjust2b*(Last_Mult2b-1)/(Last_Mult2b-median(Fmult2[adjusted_OFL_F_Rebuild]))
-        if(!is.na(F_adjust2a)){
-          if(is.infinite(F_adjust2a)){
-            F_adjust2a <- global_adjuster
-          }else if(F_adjust2a <= 0){
-            F_adjust2a <- 0.5
+      
+      if(fitting_Rebuild==TRUE){
+        if(Rebuild.Scale==0){
+            Fmult3[adjusted_Rebuild_F_Rebuild] <- 1
           }
-          if(is.infinite(F_adjust2a)){
-            F_adjust2a <- global_adjuster
-          }else if(F_adjust2a > 0){
-            Fmult2a <- Fmult2[adjusted_Rebuild_F_Rebuild]
-            if(length(Fmult2a[Fmult2a<1])>0){
-              Fmult2a[Fmult2a<1] <- exp(log(Fmult2a[Fmult2a<1])*F_adjust2a)
-            }
-            if(length(Fmult2a[Fmult2a>1])>0){
-              Fmult2a[Fmult2a>1] <- ((Fmult2a[Fmult2a>1]-1)*F_adjust2a+1)
-            }
-            Fmult2[adjusted_Rebuild_F_Rebuild] <- Fmult2a
-        }else{
-          F_adjust2a <- global_adjuster
-        }}else{
-          F_adjust2a <- global_adjuster
-        }
-        if(!is.na(F_adjust2b)){
-          if(is.infinite(F_adjust2b)){
-            F_adjust2b <- global_adjuster
-          }else if(F_adjust2b <= 0){
-            F_adjust2b <- 0.5
+      }
+      
+      if(fitting_Fixed_Catch==FALSE){
+        Fmult4 <- rep(1,forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols))
+      }
+      
+      #Adjust any multipliers of fixed catch values to 1 so that the 
+      #search algorithm will consider them to have achieved their target	
+      if(!is.null(fixed_ref)){
+        Fmult1[fixed_ref] <- 1
+        Fmult2[fixed_ref] <- 1
+        Fmult3[fixed_ref] <- 1
+        Fmult4[fixed_ref] <- 1
+        Fmult1_raw[fixed_ref] <- 1
+        Fmult2_raw[fixed_ref] <- 1
+      }
+      Comb_Mult <- Fmult1*Fmult2*Fmult3*Fmult4
+      Comb_Mult[which(forecast_F[,4]>=max_F_limit & Comb_Mult>1)] <- 1
+      
+      Curr_max_mult <- max(abs(1-Fmult1_raw*Fmult2_raw*Fmult3*Fmult4))
+      
+      Curr_median_mult <- median(abs(1-Fmult1_raw*Fmult2_raw*Fmult3*Fmult4))
+      
+      Min_max_mult <- min(Min_max_mult,Curr_max_mult)
+      
+      Min_median_mult <- min(Min_median_mult,Curr_median_mult)
+      
+      #Plot out progess in achieving targets. This is primarily for diagnosis of a 
+      #run that is failing to converge on an answer in a reasonable period of time.
+      if(Make_plots==TRUE){
+        try(
+          {
+            par(mar=c(4,3,3,2))
+            col_options <- c("black","dark red","dark green","dark blue","orange","purple","red","green","blue","brown","pink","yellow",colors())
+            point_options <- c(16,15,17,18,8,9,10,11,12,13,0,1,2,3,4,5,6,14,21,22,23,24,25,19,20)
+            plot(Fmult1,xlab="year/season/fleet",ylab="Depletion Adjustment",col=rep(col_options[seq_along(F_cols)],forecast[["Nforecastyrs"]]*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),forecast[["Nforecastyrs"]]),main = paste0(method," loop = ",loop))
+            plot(rep(F_adjust1,forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols)),xlab="year/season/fleet",ylab="Depletion Optimization Adjustment",col=rep(col_options[seq_along(F_cols)],forecast[["Nforecastyrs"]]*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),forecast[["Nforecastyrs"]]),main = paste0(method," loop = ",loop))
+            plot(Fmult2,xlab="year/season/fleet",ylab="F Adjustment",col=rep(col_options[seq_along(F_cols)],forecast[["Nforecastyrs"]]*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),forecast[["Nforecastyrs"]]),main = paste0(method," loop = ",loop))
+            plot(F_adjust2,xlab="year/season/fleet",ylab="F Optimization Adjustment",col="red",pch=16,main = paste0(method," loop = ",loop))
+            plot(Fmult3,xlab="year/season/fleet",ylab="Allocation Adjustment",col=rep(col_options[seq_along(F_cols)],forecast[["Nforecastyrs"]]*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),forecast[["Nforecastyrs"]]),main = paste0(method," loop = ",loop))
+            plot(F_adjust2_2,xlab="year/season/fleet",ylab="Allocation Optimization Adjustment",col=rep(col_options[seq_along(F_cols)],forecast[["Nforecastyrs"]]*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),forecast[["Nforecastyrs"]]),main = paste0(method," loop = ",loop))
           }
-          if(is.infinite(F_adjust2b)){
-            F_adjust2b <- global_adjuster
-          }else if(F_adjust2b > 0){
-          Fmult2b <- Fmult2[adjusted_OFL_F_Rebuild]
-          if(length(Fmult2b[Fmult2b<1])>0){
-            Fmult2b[Fmult2b<1] <- exp(log(Fmult2b[Fmult2b<1])*F_adjust2b)
+        )
+      }
+      #Check if all targets have been achieved and if so stop fitting
+      if(max(abs(1-Fmult1_raw))>Depletion.Threshold | max(abs(1-Fmult2_raw))>Annual.F.Threshold | max(abs(1-Fmult3))>Allocation.Threshold | max(abs(1-Fmult4))>Annual.F.Threshold | abs(search_step)>Step.Threshold | loop < 2){keepFitting<-TRUE}else{keepFitting<-FALSE}
+      if(FScale==0 & loop>2 & fitting_Fixed_Catch==FALSE){keepFitting<-FALSE}
+    
+      if(is.element(loop,c(1:30,seq(35,1000,5))) | global_adjuster<1){
+        if(Messages == TRUE){
+          message(paste0("Current ",method," loop = ",loop," ; still optimizing = ",keepFitting))
+          message(paste0("Depletion optimization scaler = ",round(max(abs(1-Fmult1_raw)),6)," ; threshold <= ",Depletion.Threshold))
+          message(paste0("Annual F optimization max scaler = ",round(max(abs(1-Fmult2_raw)),6)," ; threshold <= ",Annual.F.Threshold))
+          message(paste0("Allocation optimization max scaler = ",round(max(abs(1-Fmult3)),6)," ; threshold <= ",Allocation.Threshold))
+          message(paste0("Fixed catch optimization max scaler = ",round(max(abs(1-Fmult4)),6)," ; threshold <= ",Annual.F.Threshold))
+          message(paste0("Step size optimization max scaler = ",search_step," ; threshold <= ",Step.Threshold))
+          message(paste0("Global multiplier adjuster = ",global_adjuster))
+          message(paste0("Current max multiplier = ",Curr_max_mult))
+          message(paste0("Best max multiplier = ",Min_max_mult))
+          message(paste0("Current median multiplier = ",Curr_median_mult))
+          message(paste0("Best median multiplier = ",Min_median_mult))
+        }
+      }
+
+      if(is.element(loop,c(50,100,200,500,1000,seq(1500,10000,500)))){
+        Depletion.Threshold <- Depletion.Threshold*10
+        Annual.F.Threshold <- Annual.F.Threshold*10
+        Allocation.Threshold <- Allocation.Threshold*10
+      }
+
+      #Here we check that no Fs have been reduced to zero that need some catch
+      #If that has occured repace the zero F with a small starting value 0.05 so that the 
+      #search algorithm can act on it to achieve the true target value.
+      #This is needed if the ABC loop was used to perform a zero catch run and then 
+      #rebuild run is performed starting from those zero values
+      zero_Fs <- which(forecast_F[,4]==0)
+      increase_Fs <- which(Comb_Mult>1)
+      if(length(zero_Fs)>0 & length(increase_Fs)>0){
+        zero_Fs <- zero_Fs[which(Forecast_catch_setup[zero_Fs,4]!=0)]
+        if(length(zero_Fs)>0){
+          mod_Fs <- zero_Fs[which(is.element(zero_Fs,increase_Fs))]
+          if(length(mod_Fs)>0){
+            message("F values being reset from 0 to initial average this shouldn't happen so check results")
+            forecast_F[mod_Fs,4] <- Forecast_catch_setup[mod_Fs,4]
+            Comb_Mult[mod_Fs] <- runif(length(mod_Fs),0.95,1.05)
           }
-          if(length(Fmult2b[Fmult2b>1])>0){
-            Fmult2b[Fmult2b>1] <- ((Fmult2b[Fmult2b>1]-1)*F_adjust2b+1)
-          }
-          Fmult2[adjusted_OFL_F_Rebuild] <- Fmult2b
-        }else{
-          F_adjust2b <- global_adjuster
-        }}else{
-          F_adjust2b <- global_adjuster
         }
       }
-    }
-    Fmult1 <- rep(DepletionScale,forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols))
-	#Here the achieved catch fractions by fishing sector and year are calculated and compared relative
-	#to the target allocations. An adjustment multiplier is then computed to adjust fleet Fs closer to a
-	#value expected to achieve the target allocations.
-    if(FScale > 0){
-      if(n_groups>0){
-        Catch_temp <- TimeFit3[,Catch_cols3]
-        Catch_tot <- apply(Catch_temp[,unlist(fleets_by_group),drop=FALSE],1,sum)
-        for(i in 1:n_groups){
-          sort.mat <- matrix(NA, nrow = forecast[["Nforecastyrs"]]*length(seasons)*length(which(groups==i)), ncol = 2)
-          sort.mat[,1] <- rep(1:forecast[["Nforecastyrs"]],length(seasons)*length(which(groups==i)))
-          sort.mat[,2] <- rep(apply(Catch_temp[,fleets_by_group[[i]],drop=FALSE],1,sum)/Catch_tot,length(seasons)*length(which(groups==i)))
-          sort.mat <- sort.mat[order(sort.mat[,1]),]
-          Allocations[Allocations[,4]==i,6] <- sort.mat[,2]
-        }
-      }
-      Fmult3 <- (0.5*(Allocations[,5]/Allocations[,6]-1)+1)
-      Fmult3[which(Allocations[,7]==0)] <- 1
-    }else{
-      Fmult3 <- rep(1,forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols))
-    }
-
-    if(fitting_Rebuild==TRUE){
-      if(Rebuild.Scale==0){
-          Fmult3[adjusted_Rebuild_F_Rebuild] <- 1
-        }
-    }
-
-    if(fitting_Fixed_Catch==FALSE){
-      Fmult4 <- rep(1,forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols))
-    }
-
-
-
-	#Adjust any multipliers of fixed catch values to 1 so that the
-    #search algorithm will consider them to have achieved their target
-    if(!is.null(fixed_ref)){
-      Fmult1[fixed_ref] <- 1
-      Fmult2[fixed_ref] <- 1
-      Fmult3[fixed_ref] <- 1
-      Fmult4[fixed_ref] <- 1
-      Fmult1_raw[fixed_ref] <- 1
-      Fmult2_raw[fixed_ref] <- 1
-    }
-    Comb_Mult <- Fmult1*Fmult2*Fmult3*Fmult4
-    Comb_Mult[which(forecast_F[,4]>=max_F_limit & Comb_Mult>1)] <- 1
-
-    Curr_max_mult <- max(abs(1-Fmult1_raw*Fmult2_raw*Fmult3*Fmult4))
-
-    Curr_median_mult <- median(abs(1-Fmult1_raw*Fmult2_raw*Fmult3*Fmult4))
-
-    Min_max_mult <- min(Min_max_mult,Curr_max_mult)
-
-    Min_median_mult <- min(Min_median_mult,Curr_median_mult)
-
-	#Plot out progess in achieving targets. This is primarily for diagnosis of a
-	#run that is failing to converge on an answer in a reasonable period of time.
-    if(Make_plots==TRUE){
-      try(
-        {
-          par(mar=c(4,3,3,2))
-          col_options <- c("black","dark red","dark green","dark blue","orange","purple","red","green","blue","brown","pink","yellow",colors())
-          point_options <- c(16,15,17,18,8,9,10,11,12,13,0,1,2,3,4,5,6,14,21,22,23,24,25,19,20)
-          plot(Fmult1,xlab="year/season/fleet",ylab="Depletion Adjustment",col=rep(col_options[seq_along(F_cols)],forecast[["Nforecastyrs"]]*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),forecast[["Nforecastyrs"]]),main = paste0(method," loop = ",loop))
-          plot(rep(F_adjust1,forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols)),xlab="year/season/fleet",ylab="Depletion Optimization Adjustment",col=rep(col_options[seq_along(F_cols)],forecast[["Nforecastyrs"]]*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),forecast[["Nforecastyrs"]]),main = paste0(method," loop = ",loop))
-          plot(Fmult2,xlab="year/season/fleet",ylab="F Adjustment",col=rep(col_options[seq_along(F_cols)],forecast[["Nforecastyrs"]]*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),forecast[["Nforecastyrs"]]),main = paste0(method," loop = ",loop))
-          plot(F_adjust2,xlab="year/season/fleet",ylab="F Optimization Adjustment",col="red",pch=16,main = paste0(method," loop = ",loop))
-          plot(Fmult3,xlab="year/season/fleet",ylab="Allocation Adjustment",col=rep(col_options[seq_along(F_cols)],forecast[["Nforecastyrs"]]*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),forecast[["Nforecastyrs"]]),main = paste0(method," loop = ",loop))
-          plot(F_adjust2_2,xlab="year/season/fleet",ylab="Allocation Optimization Adjustment",col=rep(col_options[seq_along(F_cols)],forecast[["Nforecastyrs"]]*length(seasons)),pch=rep(sort(rep(point_options[seq_along(seasons)],length(F_cols))),forecast[["Nforecastyrs"]]),main = paste0(method," loop = ",loop))
-        }
-      )
-    }
-	#Check if all targets have been achieved and if so stop fitting
-    if(max(abs(1-Fmult1_raw))>Depletion.Threshold | max(abs(1-Fmult2_raw))>Annual.F.Threshold | max(abs(1-Fmult3))>Allocation.Threshold | max(abs(1-Fmult4))>Annual.F.Threshold | abs(search_step)>Step.Threshold | loop < 2){keepFitting<-TRUE}else{keepFitting<-FALSE}
-    if(FScale==0 & loop>2 & fitting_Fixed_Catch==FALSE){keepFitting<-FALSE}
-
-    if(is.element(loop,c(1:30,seq(35,1000,5))) | global_adjuster<1){
-      if(Messages == TRUE){
-        message(paste0("Current ",method," loop = ",loop," ; still optimizing = ",keepFitting))
-        message(paste0("Depletion optimization scaler = ",round(max(abs(1-Fmult1_raw)),6)," ; threshold <= ",Depletion.Threshold))
-        message(paste0("Annual F optimization max scaler = ",round(max(abs(1-Fmult2_raw)),6)," ; threshold <= ",Annual.F.Threshold))
-        message(paste0("Allocation optimization max scaler = ",round(max(abs(1-Fmult3)),6)," ; threshold <= ",Allocation.Threshold))
-        message(paste0("Fixed catch optimization max scaler = ",round(max(abs(1-Fmult4)),6)," ; threshold <= ",Annual.F.Threshold))
-        message(paste0("Step size optimization max scaler = ",search_step," ; threshold <= ",Step.Threshold))
-        message(paste0("Global multiplier adjuster = ",global_adjuster))
-        message(paste0("Current max multiplier = ",Curr_max_mult))
-        message(paste0("Best max multiplier = ",Min_max_mult))
-        message(paste0("Current median multiplier = ",Curr_median_mult))
-        message(paste0("Best median multiplier = ",Min_median_mult))
-      }
-    }
-    if(is.element(loop,c(50,100,200,500,1000,seq(1500,10000,500)))){
-      Depletion.Threshold <- Depletion.Threshold*10
-      Annual.F.Threshold <- Annual.F.Threshold*10
-      Allocation.Threshold <- Allocation.Threshold*10
-    }
-	#Here we check that no Fs have been reduced to zero that need some catch
-	#If that has occured repace the zero F with a small starting value 0.05 so that the
-	#search algorithm can act on it to achieve the true target value.
-	#This is needed if the ABC loop was used to perform a zero catch run and then
-	#rebuild run is performed starting from those zero values
-    zero_Fs <- which(forecast_F[,4]==0)
-    increase_Fs <- which(Comb_Mult>1)
-    if(length(zero_Fs)>0 & length(increase_Fs)>0){
-     zero_Fs <- zero_Fs[which(Forecast_catch_setup[zero_Fs,4]!=0)]
-     if(length(zero_Fs)>0){
-      mod_Fs <- zero_Fs[which(is.element(zero_Fs,increase_Fs))]
-      if(length(mod_Fs)>0){
-        message("F values being reset from 0 to initial average this shouldn't happen so check results")
-        forecast_F[mod_Fs,4] <- Forecast_catch_setup[mod_Fs,4]
-        Comb_Mult[mod_Fs] <- runif(length(mod_Fs),0.95,1.05)
-      }
-     }
-    }
-    forecast_F[,4] <- forecast_F[,4]*Comb_Mult
-    }
-  }
-	#Now adjust the previous F values by the estimated multiplier to create a
-	#new estimate of the target Fs, make sure to overwrite any fixed catches
-	#with their original values.
-
+    } 
+  
+	  #Now adjust the previous F values by the estimated multiplier to create a 
+	  #new estimate of the target Fs, make sure to overwrite any fixed catches 
+	  #with their original values.
+    
     if(!is.null(fixed_ref)){
       forecast_F[fixed_ref,4] <- Fixed_catch_target[,4]
     }
-
-    if(Curr_median_mult > Last_median_mult & Curr_max_mult > Last_max_mult){
+    
+    if(Curr_median_mult > 2*Last_median_mult & Curr_max_mult > 2*Last_max_mult){
+      browser()
+      Last_median_mult <- 2*Last_median_mult
+      
+      Forecast_catch_setup[Forecast_catch_setup[,"Fixed"]==0,4] <- Forecast_catch_setup[Forecast_catch_setup[,"Fixed"]==0,12]
+      Forecast_catch_setup[Forecast_catch_setup[,"Fixed"]==0,10] <- Forecast_catch_setup[Forecast_catch_setup[,"Fixed"]==0,4] /Forecast_catch_setup[Forecast_catch_setup[,"Fixed"]==0,8]
+      
+      fleets_to_ratio <- which(effort_reduction_ratio$Ratio<1)
+      for(i in seq_along(fleets_to_ratio)){
+        target_Mult <-((Forecast_catch_setup[,10]-1)*(1-Forecast_catch_setup[,9])+1)[which(Forecast_catch_setup[,3]==fleets_to_ratio[i])]
+        target_Mult <- ifelse(target_Mult>1,1,target_Mult)
+        base_par <- Forecast_catch_setup[which(Forecast_catch_setup[,3]==fleets_to_ratio[i]),11]
+        base_Mult <- 1/(1+exp(-base_par))
+        new_Mult <- base_Mult*target_Mult
+        new_Par <- -log((1/new_Mult)-1)
+        new_dev <- new_Par-base_par
+        parlist[["parm_devs"]][[i]][,2] <- new_dev
+      }
+      
       forecast_F <- last_forecast_F
+      
       global_adjuster <- global_adjuster*0.95
       if(loop > 10){
         global_adjuster <- global_adjuster*0.85
@@ -1600,9 +1750,31 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
         Allocation.Threshold <- min(Allocation.Threshold*2,Min_max_mult)
       }
     }else{
+      Forecast_catch_setup[Forecast_catch_setup[,"Fixed"]==0,12] <- Forecast_catch_setup[Forecast_catch_setup[,"Fixed"]==0,4]
+      Forecast_catch_setup[Forecast_catch_setup[,"Fixed"]==0,4] <- Forecast_catch_setup[Forecast_catch_setup[,"Fixed"]==0,4]*Comb_Mult[Forecast_catch_setup[,"Fixed"]==0]
+      Forecast_catch_setup[Forecast_catch_setup[,"Fixed"]==0,10] <- Forecast_catch_setup[Forecast_catch_setup[,"Fixed"]==0,4] /Forecast_catch_setup[Forecast_catch_setup[,"Fixed"]==0,8]
+      ratio_Fs <- which(Forecast_catch_setup[,10]<1 & Forecast_catch_setup[,9]<1)
+      Free_Fs <- c(seq_along(Forecast_catch_setup[,1]))[which(Forecast_catch_setup[,10]!=1)]
+      Free_Fs <- Free_Fs[which(!is.element(Free_Fs,ratio_Fs))]
+      
+      forecast_F[Free_Fs,4] <- Forecast_catch_setup[Free_Fs,4]
+      forecast_F[ratio_Fs,4] <- Forecast_catch_setup[ratio_Fs,8]*((Forecast_catch_setup[ratio_Fs,10]-1)*Forecast_catch_setup[ratio_Fs,9]+1)
+
+      fleets_to_ratio <- which(effort_reduction_ratio$Ratio<1)
+      for(i in seq_along(fleets_to_ratio)){
+        target_Mult <-((Forecast_catch_setup[,10]-1)*(1-Forecast_catch_setup[,9])+1)[which(Forecast_catch_setup[,3]==fleets_to_ratio[i])]
+        target_Mult <- ifelse(target_Mult>1,1,target_Mult)
+        base_par <- Forecast_catch_setup[which(Forecast_catch_setup[,3]==fleets_to_ratio[i]),11]
+        base_Mult <- 1/(1+exp(-base_par))
+        new_Mult <- base_Mult*target_Mult
+        new_Par <- -log((1/new_Mult)-1)
+        new_dev <- new_Par-base_par
+        parlist[["parm_devs"]][[i]][,2] <- new_dev
+      }
       last_forecast_F <- forecast[["ForeCatch"]]
-      #Record the previous adjustment values so they can be used to optimize
-      #step sizes to speed up target convergence
+      
+      #Record the previous adjustment values so they can be used to optimize 
+      #step sizes to speed up target convergence	
       Last_Mult1 <- DepletionScale
       Last_Mult2 <- Fmult2
       if(!is.null(rebuild_ref)){
@@ -1620,6 +1792,7 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
     #Write the modified forecast data out to a file and rerun projections
     unlink(paste0(getwd(),"/forecast.ss"))
     r4ss::SS_writeforecast(mylist=forecast,overwrite = TRUE, verbose = Verbose)
+    r4ss::SS_writepar_3.30(parlist = parlist, outfile = par_name, overwrite = TRUE, verbose = Verbose)
 
     dir <- normalizePath(getwd())
     if(Run_in_MSE==FALSE){
@@ -1651,10 +1824,10 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
           message(paste0("Constant Catch target ",CC_loop," of ",length(Const_Catch)," achieved for allocation loop ",allocation_loop," of ",N_allocation_scenarios))
         }
         if(Calc_Hessian==TRUE | Do_Pstar==TRUE){
+          #Adjust admb options so that estimation is done and the hessian is solved.
+          #TODO: Check to see if you can invert the hessian without estimating using the other ADMB commands
           admb_options <- ""
-          start$last_estimation_phase <- 10
-          r4ss::SS_writestarter(mylist=start,overwrite = TRUE, verbose = Verbose)
-
+          
           dir <- normalizePath(getwd())
           if(Run_in_MSE==FALSE){
             bin <- file.path(dir,SS_exe)
@@ -1685,12 +1858,11 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
           projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("ForeCatchF_CC_",CC_loop)]] <- projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("ForeCatchF_CC_",CC_loop)]][-grep("annF_",projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("ForeCatchF_CC_",CC_loop)]][,"Label"]),]
           projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("ForeCatchDead_CC_",CC_loop)]] <- resultsFit$derived_quants[grep("ForeCatch_",resultsFit$derived_quants$Label),1:3]
           projection_results[[paste0("Allocation_run_",allocation_loop)]][[paste0("ForeCatchRetained_CC_",CC_loop)]] <- resultsFit$derived_quants[grep("ForeCatchret_",resultsFit$derived_quants$Label),1:3]
-
-          start$last_estimation_phase <- 0
-          r4ss::SS_writestarter(mylist=start,overwrite = TRUE, verbose = Verbose)
+          
+          admb_options <- "-maxfn 0 -phase 50 -nohess"
         }
-        admb_options <- "-nohess"
-
+        
+        
         temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
         if(Keep_files==2){
           temp.files <- temp.files[is.element(temp.files,c("starter.ss","starter.ss_new","ss.par",
@@ -1747,9 +1919,7 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
         }
         if(Calc_Hessian==TRUE | Do_Pstar==TRUE){
           admb_options <- ""
-          start$last_estimation_phase <- 10
-          r4ss::SS_writestarter(mylist=start,overwrite = TRUE, verbose = Verbose)
-
+          
           dir <- normalizePath(getwd())
           if(Run_in_MSE==FALSE){
             bin <- file.path(dir,SS_exe)
@@ -1781,11 +1951,9 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
           projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_Benchmark"]] <- projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_Benchmark"]][-grep("annF_",projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_Benchmark"]][,"Label"]),]
           projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchDead_Benchmark"]] <- resultsFit$derived_quants[grep("ForeCatch_",resultsFit$derived_quants$Label),1:3]
           projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchRetained_Benchmark"]] <- resultsFit$derived_quants[grep("ForeCatchret_",resultsFit$derived_quants$Label),1:3]
-
-          start$last_estimation_phase <- 0
-          r4ss::SS_writestarter(mylist=start,overwrite = TRUE, verbose = Verbose)
+          
+          admb_options <- "-maxfn 0 -phase 50 -nohess"
         }
-        admb_options <- "-nohess"
         #Write out the Benchmark results to a new folder (replace any old folder that exists)
         temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
         if(Keep_files==2){
@@ -1845,9 +2013,7 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
         }
         if(Calc_Hessian==TRUE){
           admb_options <- ""
-          start$last_estimation_phase <- 10
-          r4ss::SS_writestarter(mylist=start,overwrite = TRUE, verbose = Verbose)
-
+          
           dir <- normalizePath(getwd())
           if(Run_in_MSE==FALSE){
             bin <- file.path(dir,SS_exe)
@@ -1879,11 +2045,9 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
           projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_OFL"]] <- projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_OFL"]][-grep("annF_",projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_OFL"]][,"Label"]),]
           projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchDead_OFL"]] <- resultsFit$derived_quants[grep("ForeCatch_",resultsFit$derived_quants$Label),1:3]
           projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchRetained_OFL"]] <- resultsFit$derived_quants[grep("ForeCatchret_",resultsFit$derived_quants$Label),1:3]
-
-          start$last_estimation_phase <- 0
-          r4ss::SS_writestarter(mylist=start,overwrite = TRUE, verbose = Verbose)
+          
+          admb_options <- "-maxfn 0 -phase 50 -nohess"
         }
-        admb_options <- "-nohess"
         temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
         if(Keep_files==2){
           temp.files <- temp.files[is.element(temp.files,c("starter.ss","starter.ss_new","ss.par",
@@ -1967,9 +2131,7 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
         }
         if(Calc_Hessian==TRUE){
           admb_options <- ""
-          start$last_estimation_phase <- 10
-          r4ss::SS_writestarter(mylist=start,overwrite = TRUE, verbose = Verbose)
-
+          
           dir <- normalizePath(getwd())
           if(Run_in_MSE==FALSE){
             bin <- file.path(dir,SS_exe)
@@ -2001,11 +2163,9 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
           projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_ABC"]] <- projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_ABC"]][-grep("annF_",projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_ABC"]][,"Label"]),]
           projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchDead_ABC"]] <- resultsFit$derived_quants[grep("ForeCatch_",resultsFit$derived_quants$Label),1:3]
           projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchRetained_ABC"]] <- resultsFit$derived_quants[grep("ForeCatchret_",resultsFit$derived_quants$Label),1:3]
-
-          start$last_estimation_phase <- 0
-          r4ss::SS_writestarter(mylist=start,overwrite = TRUE, verbose = Verbose)
+          
+          admb_options <- "-maxfn 0 -phase 50 -nohess"
         }
-        admb_options <- "-nohess"
         temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
         if(Keep_files==2){
           temp.files <- temp.files[is.element(temp.files,c("starter.ss","starter.ss_new","ss.par",
@@ -2079,9 +2239,7 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
         }
         if(Calc_Hessian==TRUE){
           admb_options <- ""
-          start$last_estimation_phase <- 10
-          r4ss::SS_writestarter(mylist=start,overwrite = TRUE, verbose = Verbose)
-
+          
           dir <- normalizePath(getwd())
           if(Run_in_MSE==FALSE){
             bin <- file.path(dir,SS_exe)
@@ -2113,11 +2271,9 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
           projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_F0"]] <- projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_F0"]][-grep("annF_",projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_F0"]][,"Label"]),]
           projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchDead_F0"]] <- resultsFit$derived_quants[grep("ForeCatch_",resultsFit$derived_quants$Label),1:3]
           projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchRetained_F0"]] <- resultsFit$derived_quants[grep("ForeCatchret_",resultsFit$derived_quants$Label),1:3]
-
-          start$last_estimation_phase <- 0
-          r4ss::SS_writestarter(mylist=start,overwrite = TRUE, verbose = Verbose)
+          
+          admb_options <- "-maxfn 0 -phase 50 -nohess"
         }
-        admb_options <- "-nohess"
         temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
         if(Keep_files==2){
           temp.files <- temp.files[is.element(temp.files,c("starter.ss","starter.ss_new","ss.par",
@@ -2180,9 +2336,7 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
         }
         if(Calc_Hessian==TRUE){
           admb_options <- ""
-          start$last_estimation_phase <- 10
-          r4ss::SS_writestarter(mylist=start,overwrite = TRUE, verbose = Verbose)
-
+          
           dir <- normalizePath(getwd())
           if(Run_in_MSE==FALSE){
             bin <- file.path(dir,SS_exe)
@@ -2214,11 +2368,9 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
           projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_Rebuild"]] <- projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_Rebuild"]][-grep("annF_",projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchF_Rebuild"]][,"Label"]),]
           projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchDead_Rebuild"]] <- resultsFit$derived_quants[grep("ForeCatch_",resultsFit$derived_quants$Label),1:3]
           projection_results[[paste0("Allocation_run_",allocation_loop)]][["ForeCatchRetained_Rebuild"]] <- resultsFit$derived_quants[grep("ForeCatchret_",resultsFit$derived_quants$Label),1:3]
-
-          start$last_estimation_phase <- 0
-          r4ss::SS_writestarter(mylist=start,overwrite = TRUE, verbose = Verbose)
+          
+          admb_options <- "-maxfn 0 -phase 50 -nohess"
         }
-        admb_options <- "-nohess"
         temp.files <- list.files(path=paste0(Assessment_dir,"/Working_dir"))
         if(Keep_files==2){
           temp.files <- temp.files[is.element(temp.files,c("starter.ss","starter.ss_new","ss.par",
