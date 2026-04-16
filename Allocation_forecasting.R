@@ -77,7 +77,8 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
                           Verbose = FALSE,
                           Keep_Only_Final = FALSE,
                           Keep_files = 1, #Which run files to keep options(1:All files,2:Minimum subset for r4ss output,3:Only Report)
-                          Messages = TRUE
+                          Messages = TRUE,
+                          SS_raw_spr_setting = 4
                           )
 {
 
@@ -282,7 +283,7 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
   start$last_estimation_phase <- 0
   start$depl_basis <- 1
   start$depl_denom_frac <- 1
-  start$SPR_basis <- 4
+  start$SPR_basis <- SS_raw_spr_setting
   start$F_report_units <- 1
   start$F_report_basis <- 0
 
@@ -1240,6 +1241,9 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
       if(is.nan(DepletionScale)){
         DepletionScale <- 1
       }
+
+      Fmult1_raw <- rep(DepletionScale,forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols))
+
       if(DepletionScale <= 0){
         DepletionScale <- 1
       }
@@ -1249,7 +1253,6 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
       if(DepletionScale >= 2){
         DepletionScale <- 2
       }
-    Fmult1_raw <- rep(DepletionScale,forecast[["Nforecastyrs"]]*length(seasons)*length(F_cols))
     #Fmult2 calculations define the multiplier for adjusting annual F values
     #Zero catch years are identified first to prevent divide by zero errors in the scaling and
     #to tell the search algorithm that the target has been achieved
@@ -1586,7 +1589,7 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
       forecast_F[fixed_ref,4] <- Fixed_catch_target[,4]
     }
 
-    if(Curr_median_mult > Last_median_mult){
+    if(Curr_median_mult > Last_median_mult & Curr_max_mult > Last_max_mult){
       forecast_F <- last_forecast_F
       global_adjuster <- global_adjuster*0.95
       if(loop > 10){
