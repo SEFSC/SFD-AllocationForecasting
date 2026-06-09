@@ -373,7 +373,8 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
   TargetYears <- TargetYears[,c(2,F_cols2)]
   seasons <- unique(TargetYears[,1])
   F_by_Fleet_seas <- as.data.frame(matrix(apply(TargetYears[TargetYears[,1]==seasons[1],,drop=FALSE], 2, mean),nrow=1,ncol=(length(F_cols)+1)))
-
+  F_by_Fleet_fleet_index <- which(dat$fleetinfo$type!=3)
+  
   if(length(seasons)>1){
     for(i in seasons[-1]){
       F_by_Fleet_seas <- rbind(F_by_Fleet_seas,apply(TargetYears[TargetYears[,1]==i,,drop=FALSE], 2, mean))
@@ -397,7 +398,8 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
             F_by_Fleet_seas_bycatch <- rbind(F_by_Fleet_seas_bycatch,apply(TargetYears_bycatch[TargetYears_bycatch[,1]==i,,drop=FALSE], 2, mean))
           }
         }
-        F_by_Fleet_seas[1,(dat$bycatch_fleet_info[i,1]+1)] <- F_by_Fleet_seas_bycatch[1,(dat$bycatch_fleet_info[i,1]+1)]
+        
+        F_by_Fleet_seas[1,(which(F_by_Fleet_fleet_index==dat$bycatch_fleet_info[i,1])+1)] <- F_by_Fleet_seas_bycatch[1,(which(F_by_Fleet_fleet_index==dat$bycatch_fleet_info[i,1])+1)]
       }
     }
   }
