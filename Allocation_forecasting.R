@@ -1009,11 +1009,14 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
         Achieved.Depletion <- min(Achieved.Depletion,.9)
         if(First_run == TRUE){
           Target.Depletion <- forecast[["Btarget"]]
+          Target.Depletion.history <- Target.Depletion
+          Achieved.Depletion.history <- Achieved.Depletion
+          Achieved.Equilibrium.yield.history <- "Optimizing"
           First_run <- FALSE
         }
         Target.Rebuild <- Target.Depletion
         Achieved.SSB <- Achieved.Depletion
-
+        Achieved.Depletion.history[length(Achieved.Depletion.history)] <- Achieved.Depletion
         if(max(abs(1-Fmult3))>Allocation.Threshold |
 		       max(abs(1-Fmult2_raw))>Annual.F.Threshold |
 		       max(abs(1-Fmult1_raw))>Depletion.Threshold){
@@ -1027,6 +1030,8 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
             Achieved.Catch <- sum(TimeFit3[(length(TimeFit3[,1])-9):length(TimeFit3[,1]),Catch_cols3])/10
           }
           MSY.Fit[1,] <- c(Achieved.Catch,FScale,Achieved.Depletion,Target.Depletion)
+          
+          Achieved.Equilibrium.yield.history[length(Achieved.Equilibrium.yield.history)] <- Achieved.Catch
         }else{
           Min_max_mult <- Min_median_mult <- Last_max_mult <- Last_median_mult <- 10000
           F_adjust1 <- F_adjust1_2 <- 1
@@ -1040,6 +1045,7 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
           }
           MSY.Fit <- rbind(MSY.Fit[1,],MSY.Fit)
           MSY.Fit[1,] <- c(Achieved.Catch,FScale,Achieved.Depletion,Target.Depletion)
+          Achieved.Equilibrium.yield.history[length(Achieved.Equilibrium.yield.history)] <- Achieved.Catch
           if(loop>1){
             if(Achieved.Catch<Last_Achieved_Catch){
               search_step <- -0.3*search_step
@@ -1075,6 +1081,10 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
             Target.Depletion <- New.Target.Depletion
           }
           Last_Achieved_Catch <- Achieved.Catch
+
+          Target.Depletion.history <- c(Target.Depletion.history, Target.Depletion)
+          Achieved.Depletion.history <- c(Achieved.Depletion.history, "Optimizing")
+          Achieved.Equilibrium.yield.history <- c(Achieved.Equilibrium.yield.history, "Optimizing")
         }
         DepletionScale <- (1-Target.Depletion)/(1-Achieved.Depletion)
 
@@ -1564,11 +1574,11 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
     if(is.element(loop,c(0:30,seq(35,1000,5))) | global_adjuster<1){
       if(Messages == TRUE){
         message(paste0("Current ",method," loop = ",loop," ; subloop = ",subloop," ; still optimizing = ",keepFitting))
-        message(paste0("Depletion optimization scaler = ",round(max(abs(1-Fmult1_raw)),6)," ; threshold <= ",Depletion.Threshold))
-        message(paste0("Annual F optimization max scaler = ",round(max(abs(1-Fmult2_raw)),6)," ; threshold <= ",Annual.F.Threshold))
-        message(paste0("Allocation optimization max scaler = ",round(max(abs(1-Fmult3)),6)," ; threshold <= ",Allocation.Threshold))
-        message(paste0("Fixed catch optimization max scaler = ",round(max(abs(1-Fmult4)),6)," ; threshold <= ",Annual.F.Threshold))
-        message(paste0("Step size optimization max scaler = ",search_step," ; threshold <= ",Step.Threshold))
+        message(paste0("Depletion optimization: target = ",Target.Depletion," ; achieved = ",Achieved.Depletion," ; scaler = ",round(max(abs(1-Fmult1_raw)),6)," ; threshold <= ",Depletion.Threshold))
+        message(paste0("Annual F optimization: target = ",FScale," ; max scaler = ",round(max(abs(1-Fmult2_raw)),6)," ; threshold <= ",Annual.F.Threshold))
+        message(paste0("Allocation optimization: max scaler = ",round(max(abs(1-Fmult3)),6)," ; threshold <= ",Allocation.Threshold))
+        message(paste0("Fixed catch optimization: max scaler = ",round(max(abs(1-Fmult4)),6)," ; threshold <= ",Annual.F.Threshold))
+        message(paste0("Step size optimization: current step size = ",search_step," ; threshold <= ",Step.Threshold))
         message(paste0("Global multiplier adjuster = ",global_adjuster))
         message(paste0("Current max multiplier = ",Curr_max_mult))
         message(paste0("Best max multiplier = ",Min_max_mult))
@@ -1582,6 +1592,12 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
         message(paste0("F_adjust2_2 min,mean,max = ",min(F_adjust2_2),", ",mean(F_adjust2_2),", ",max(F_adjust2_2)))
         message(paste0("F_SS_adjust min,mean,max = ",min(F_SS_adjust),", ",mean(F_SS_adjust),", ",max(F_SS_adjust)))
         message(paste0("F_adjust3 min,mean,max = ",min(F_adjust3),", ",mean(F_adjust3),", ",max(F_adjust3)))
+        if(Forecast_target==2){
+          
+          message(paste0("Depletion target history = ",paste0(Target.Depletion.history,collapse = ", ")))
+          message(paste0("Depletion achieved history = ",paste0(Achieved.Depletion.history,collapse = ", ")))
+          message(paste0("Equilibrium yield achieved history = ",paste0(Achieved.Equilibrium.yield.history,collapse = ", ")))
+        }
       }
     }
     if(is.element(loop,c(50,100,200,500,1000,seq(1500,10000,500)))){
