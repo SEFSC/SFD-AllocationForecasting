@@ -1195,7 +1195,7 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
       search_step<-0.00001 #Set search step to small value so it doesn't trigger continued loops this value is only needed during the Benchmark MSY search
       DepletionScale<-1 #Set depletion scale to 1 so it doesn't trigger continued loops now that Benchmark search is complete
       FScale<-0 #Set the F target to 0 for rescaling annual F values
-
+     
       if(n_groups>1){
         projection_results[[paste0("Allocation_run_",allocation_loop)]][["Group_Catch_F0"]]<-list()
         for(i in 1:n_groups){
@@ -1292,6 +1292,7 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
     }else{
       zero_catch <- which(SPRfit$F_report[sort(rep(seq_along(SPRfit$F_report),length(seasons)*length(F_cols)))]==0)
     }
+
     if(fitting_Fixed_Catch==FALSE){
       if(length(zero_catch)>0){
         if(FScale==0){
@@ -1353,9 +1354,9 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
     Fmult2[which(is.infinite(Fmult2))] <- 1
     Fmult2[which(is.nan(Fmult2))] <- 1
     Fmult2[which(is.na(Fmult2))] <- 1
-    Fmult2[which(Fmult2<=0)] <- 1
-    Fmult2[which(Fmult2>=2)] <- 2
-    Fmult2[which(Fmult2<=0.5)] <- 0.5
+    Fmult2[which(Fmult2<0)] <- 1
+    Fmult2[which(Fmult2>2)] <- 2
+    Fmult2[which(Fmult2<0.5 & Fmult2>0)] <- 0.5
     Fmult2_raw <- Fmult2
     #Here a range of adjustments are made to the F step sizes based on the expected vs achieved change in F from
     #the previous step. i.e. if the last change only had half the impact expected on F then the next step will
