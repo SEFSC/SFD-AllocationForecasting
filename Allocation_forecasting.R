@@ -431,13 +431,13 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
   #3) Incorporate fixed values from the existing forecast file
   if(!is.null(forecast$ForeCatch)){
     for(i in seq_along(forecast$ForeCatch[,1])){
-      match_row <- which(Forecast_catch_setup[,c("Year")]==forecast$ForeCatch[i,c("Year")] &
-                         Forecast_catch_setup[,c("Seas")]==forecast$ForeCatch[i,c("Seas")] &
-                         Forecast_catch_setup[,c("Fleet")]==forecast$ForeCatch[i,c("Fleet")])
-      Forecast_catch_setup[match_row,"Catch or F"] <- forecast$ForeCatch[i,"Catch or F"]
+      match_row <- which(Forecast_catch_setup[,c("Year")]==forecast$ForeCatch[i,c(1)] &
+                         Forecast_catch_setup[,c("Seas")]==forecast$ForeCatch[i,c(2)] &
+                         Forecast_catch_setup[,c("Fleet")]==forecast$ForeCatch[i,c(3)])
+      Forecast_catch_setup[match_row,"Catch or F"] <- forecast$ForeCatch[i,4]
       Forecast_catch_setup[match_row,"Fixed"] <- 1
       if(length(forecast$ForeCatch[i,])==5){
-        Forecast_catch_setup[match_row,"Basis"] <- forecast$ForeCatch[i,"Basis"]
+        Forecast_catch_setup[match_row,"Basis"] <- forecast$ForeCatch[i,5]
       }else if(length(forecast$ForeCatch[i,])==4){
         Forecast_catch_setup[match_row,"Basis"] <- forecast$InputBasis
       }else{
@@ -549,11 +549,11 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
           groups[forecast[["fleet_assignment_to_allocation_group"]][j,1]] <- forecast[["fleet_assignment_to_allocation_group"]][j,2]
           Allocations[Allocations[,"Fleet"]==forecast[["fleet_assignment_to_allocation_group"]][j,1],4] <- forecast[["fleet_assignment_to_allocation_group"]][j,2]
         }
-        alloc <- forecast[["allocation_among_groups"]][order(forecast[["allocation_among_groups"]][,"Year"]),]
+        alloc <- forecast[["allocation_among_groups"]][order(forecast[["allocation_among_groups"]][,1]),]
         for(j in seq_along(alloc[,1])){
           for(k in seq_along(alloc[j,-1])){
-            Allocations[Allocations[,1]>=alloc[,"Year"] & Allocations[,4]==k,5] <- alloc[j,(k+1)]/sum(alloc[j,-1])
-            Allocations[Allocations[,1]>=alloc[,"Year"] & Allocations[,4]==k,7] <- 1
+            Allocations[Allocations[,1]>=alloc[,1] & Allocations[,4]==k,5] <- alloc[j,(k+1)]/sum(alloc[j,-1])
+            Allocations[Allocations[,1]>=alloc[,1] & Allocations[,4]==k,7] <- 1
           }
         }
       }else{
@@ -886,7 +886,7 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
       projection_results[[paste0("Allocation_run_",allocation_loop)]][["Recruitment_Benchmark"]] <- Achieved.Rec
     }
 
-    if(is.na(max(abs(achieved.report[,'F']-forecast_F[,"Catch or F"])[adjusted_F_OFL]))){
+    if(is.na(max(abs(achieved.report[,'F']-forecast_F[,4])[adjusted_F_OFL]))){
       if(fitting_Fixed_Catch==TRUE){
         if(Catch_trunc >= (forecast$Nforecastyrs - 20)){
           Catch_trunc <- Catch_trunc + 1
@@ -900,7 +900,7 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
       loop <- loop - 1
     }else{
 
-    if(max(abs(achieved.report[,'F']-forecast_F[,"Catch or F"])[adjusted_F_OFL])>0.1){
+    if(max(abs(achieved.report[,'F']-forecast_F[,4])[adjusted_F_OFL])>0.1){
        if(fitting_Fixed_Catch==TRUE){
          if(Catch_trunc >= (forecast$Nforecastyrs - 20)){
            Catch_trunc <- Catch_trunc + 1
@@ -910,7 +910,7 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
          Catch_Target[(forecast$Nforecastyrs-c((Catch_trunc-1):0))] <- 0
          forecast_F[(length(forecast_F[,1])-c((Catch_trunc*length(seasons)*length(F_cols)-1):0)),4] <- 0
        }
-       expected_annual <- 1-exp(-aggregate(forecast_F[,"Catch or F"],by=F_SS_adjust_year,FUN=sum)$x)
+       expected_annual <- 1-exp(-aggregate(forecast_F[,4],by=F_SS_adjust_year,FUN=sum)$x)
        achieved_annual <- 1-exp(-aggregate(achieved.report[,'F'],by=F_SS_adjust_year,FUN=sum)$x)
        F_SS_adjust <- rep(achieved_annual/expected_annual,each=length(seasons)*length(F_cols))
        F_maxed <- max(achieved.report[,'F'])
