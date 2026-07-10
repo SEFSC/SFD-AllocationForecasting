@@ -545,9 +545,9 @@ run.projections<-function(Assessment_dir, #Here you set the location of a previo
 
     if(n_groups>0){
       if(is.null(Fleet_group)){
-        for(j in seq_along(forecast[["fleet_assignment_to_allocation_group"]][,"Fleet"])){
-          groups[forecast[["fleet_assignment_to_allocation_group"]][j,"Fleet"]] <- forecast[["fleet_assignment_to_allocation_group"]][j,"Group"]
-          Allocations[Allocations[,"Fleet"]==forecast[["fleet_assignment_to_allocation_group"]][j,"Fleet"],4] <- forecast[["fleet_assignment_to_allocation_group"]][j,"Group"]
+        for(j in seq_along(forecast[["fleet_assignment_to_allocation_group"]][,1])){
+          groups[forecast[["fleet_assignment_to_allocation_group"]][j,1]] <- forecast[["fleet_assignment_to_allocation_group"]][j,2]
+          Allocations[Allocations[,"Fleet"]==forecast[["fleet_assignment_to_allocation_group"]][j,1],4] <- forecast[["fleet_assignment_to_allocation_group"]][j,2]
         }
         alloc <- forecast[["allocation_among_groups"]][order(forecast[["allocation_among_groups"]][,"Year"]),]
         for(j in seq_along(alloc[,1])){
